@@ -46,6 +46,7 @@ private struct PerformanceVoice {
 
 private struct StartedPerformanceNote {
     let startedAt: Date
+    let startOffset: TimeInterval
     let sourceVelocity: MIDIVelocity
     let instrumentName: String
     let harmonyName: String
@@ -55,7 +56,6 @@ private struct StartedPerformanceNote {
 
 final class AudioManager: ObservableObject {
     let padBaseNote: MIDINoteNumber = 36
-    let padChannel: MIDIChannel = 9
 
     @Published var currentLayer = 0
     @Published var layers: [LayerState]
@@ -68,6 +68,7 @@ final class AudioManager: ObservableObject {
     @Published var harmonyComplexity: Double = 0.45
     @Published var keyRootIndex = 0
     @Published var keyMode = HarmonyEngine.ScaleMode.major
+    @Published var padChannelNumber = 10
     @Published var scaleLabel = "C Major"
     @Published var chordLabel = "No Chord"
     @Published var harmonyLabel = "Close 3rds"
@@ -93,7 +94,12 @@ final class AudioManager: ObservableObject {
     private var loopGeneration = 0
     private var drumGeneration = 0
     private var currentPreset = InstrumentPreset.starterPresets[0]
+    private var measureAnchor = Date()
     private var hasStarted = false
+
+    private var padChannel: MIDIChannel {
+        MIDIChannel(max(0, min(15, padChannelNumber - 1)))
+    }
 
     init() {
         Settings.bufferLength = .short
@@ -127,6 +133,7 @@ final class AudioManager: ObservableObject {
         do {
             try engine.start()
             hasStarted = true
+            measureAnchor = Date()
             midi.openInput()
             configureFFT()
             loadStarterPresets()
@@ -329,6 +336,7 @@ final class AudioManager: ObservableObject {
         voicesBySourceNote[note] = voices
         startedNotes[note] = StartedPerformanceNote(
             startedAt: Date(),
+            startOffset: quantizedMeasureOffset(for: Date()),
             sourceVelocity: velocity,
             instrumentName: currentPreset.name,
             harmonyName: harmonySettings.style.name,
@@ -369,7 +377,7 @@ final class AudioManager: ObservableObject {
 
         if let startedNote {
             let duration = max(0.06, min(8, Date().timeIntervalSince(startedNote.startedAt)))
-            scheduleLoopEchoes(for: startedNote, duration: duration)
+            scheduleLoopEchoes(for: startedNote, duration: quantizedDuration(duration))
             recordPlayedEvent(note: note, startedNote: startedNote)
         }
 
@@ -533,11 +541,12 @@ final class AudioManager: ObservableObject {
         guard loopEnabled, tempoBPM > 0 else { return }
 
         let generation = loopGeneration
-        let loopInterval = (60 / tempoBPM) * selectedTimeSignature.measureBeatsInQuarterNotes
+        let loopInterval = measureDuration()
         let replayDuration = min(duration, loopInterval * 0.92)
+        let firstMeasureDelay = delayToNextMeasure(from: Date())
 
         for repeatIndex in 1...5 {
-            let delay = loopInterval * Double(repeatIndex)
+            let delay = firstMeasureDelay + startedNote.startOffset + loopInterval * Double(repeatIndex - 1)
             let gain = pow(0.88, Double(repeatIndex))
 
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -582,6 +591,7 @@ final class AudioManager: ObservableObject {
 
     private func startDrumLoop() {
         drumGeneration += 1
+        measureAnchor = Date()
         scheduleDrumBeat(step: 0, generation: drumGeneration)
     }
 
@@ -601,13 +611,7 @@ final class AudioManager: ObservableObject {
     }
 
     private func playDrumStep(_ step: Int) {
-        let isDownbeat = step == 0
-        let isBackbeat = selectedTimeSignature.beats >= 4 ? step == 2 : step == 1
-        let notes: [(MIDINoteNumber, MIDIVelocity)] = [
-            (36, isDownbeat ? 96 : 58),
-            (42, 42),
-            (38, isBackbeat ? 78 : 0)
-        ].filter { $0.1 > 0 }
+        let notes = drumNotes(for: step)
 
         for note in notes {
             drumSampler.play(noteNumber: note.0, velocity: note.1, channel: 9)
@@ -615,6 +619,65 @@ final class AudioManager: ObservableObject {
                 self?.drumSampler.stop(noteNumber: note.0, channel: 9)
             }
         }
+    }
+
+    private func drumNotes(for step: Int) -> [(MIDINoteNumber, MIDIVelocity)] {
+        switch selectedTimeSignature.label {
+        case "3/4":
+            return [
+                (36, step == 0 ? 96 : 52),
+                (42, 38),
+                (38, step == 1 ? 64 : 0)
+            ].filter { $0.1 > 0 }
+        case "6/8":
+            return [
+                (36, step == 0 ? 94 : (step == 3 ? 70 : 0)),
+                (42, step % 3 == 0 ? 46 : 34),
+                (38, step == 3 ? 62 : 0)
+            ].filter { $0.1 > 0 }
+        case "3/8":
+            return [
+                (36, step == 0 ? 88 : 0),
+                (42, 36),
+                (38, step == 2 ? 52 : 0)
+            ].filter { $0.1 > 0 }
+        default:
+            return [
+                (36, step == 0 ? 98 : (step == 2 ? 62 : 0)),
+                (42, 42),
+                (38, step == 2 ? 78 : 0)
+            ].filter { $0.1 > 0 }
+        }
+    }
+
+    private func measureDuration() -> TimeInterval {
+        (60 / tempoBPM) * selectedTimeSignature.measureBeatsInQuarterNotes
+    }
+
+    private func quantizedMeasureOffset(for date: Date) -> TimeInterval {
+        let measure = measureDuration()
+        guard measure > 0 else { return 0 }
+        let elapsed = date.timeIntervalSince(measureAnchor)
+        let offset = elapsed.truncatingRemainder(dividingBy: measure)
+        let positiveOffset = offset < 0 ? offset + measure : offset
+        let grid = gridStepDuration()
+        guard grid > 0 else { return positiveOffset }
+        let quantized = (positiveOffset / grid).rounded() * grid
+        return min(quantized, measure - 0.001)
+    }
+
+    private func quantizedDuration(_ duration: TimeInterval) -> TimeInterval {
+        let grid = gridStepDuration()
+        guard grid > 0 else { return duration }
+        return max(grid * 0.5, min(measureDuration() * 0.92, (duration / grid).rounded() * grid))
+    }
+
+    private func delayToNextMeasure(from date: Date) -> TimeInterval {
+        let measure = measureDuration()
+        guard measure > 0 else { return 0 }
+        let elapsed = date.timeIntervalSince(measureAnchor)
+        let offset = elapsed.truncatingRemainder(dividingBy: measure)
+        return offset <= 0 ? 0 : measure - offset
     }
 
     private func selectHarmonyStyle(_ padIndex: Int) {

@@ -126,6 +126,7 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - The app must fade repeats gradually enough that previous phrases remain audible while new instruments are selected.
 - The app must preserve the captured instrument timbre for scheduled repeats even after the live instrument changes.
 - The app must expose tempo and time-signature controls on screen.
+- The app must quantize scheduled loop repeats to the selected measure grid.
 - Panic/all-notes-off must cancel future scheduled loop repeats.
 
 ### Drums
@@ -133,6 +134,7 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - The app must provide a basic built-in drum beat.
 - The app must expose a drum enable/disable control on screen.
 - Drum timing must follow BPM and selected time signature.
+- Drum patterns should differ for `4/4`, `3/4`, `6/8`, and `3/8`.
 - Drum Kit must also be available as one of the selectable pad instruments.
 
 ### Visualization

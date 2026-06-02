@@ -117,6 +117,10 @@ struct ContentView: View {
                 Label("Drums", systemImage: "metronome")
             }
             .toggleStyle(.button)
+
+            Stepper("Pad Ch \(audio.padChannelNumber)", value: $audio.padChannelNumber, in: 1...16)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .frame(width: 110)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
