@@ -36,6 +36,8 @@ final class AudioManager: ObservableObject {
     @Published var visualizerBands = VisualizerBands()
     @Published var controls = PerformanceControls()
     @Published var scaleLabel = "C Major"
+    @Published var chordLabel = "No Chord"
+    @Published var harmonyLabel = "Close 3rds"
     @Published var status = "Audio engine idle"
     @Published var lastMIDIEvent = "Waiting for MiniLab Mk2"
     @Published var lastPadIndex: Int?
@@ -49,9 +51,14 @@ final class AudioManager: ObservableObject {
     private var loadedCustomInstrumentURLs: [Int: URL] = [:]
     private var harmonyVoicesBySourceNote: [MIDINoteNumber: [(layer: Int, note: MIDINoteNumber, channel: MIDIChannel)]] = [:]
     private var activePadNotes: Set<MIDINoteNumber> = []
+    private var recentMelodyNotes: [MIDINoteNumber] = []
+    private var harmonySettings = HarmonySettings()
     private var hasStarted = false
 
     init() {
+        Settings.bufferLength = .short
+        Settings.recordingBufferLength = .short
+
         let presets = InstrumentPreset.starterPresets
         layers = (0..<4).map { index in
             LayerState(id: index, name: "Layer \(index + 1)", preset: presets[index])
@@ -100,6 +107,7 @@ final class AudioManager: ObservableObject {
         }
 
         harmonyVoicesBySourceNote.removeAll()
+        recentMelodyNotes.removeAll()
         DispatchQueue.main.async {
             for layer in self.layers.indices {
                 self.layers[layer].activeNotes.removeAll()
@@ -205,25 +213,34 @@ final class AudioManager: ObservableObject {
     private func noteOn(_ note: MIDINoteNumber, velocity: MIDIVelocity, channel: MIDIChannel) {
         guard samplers.indices.contains(currentLayer) else { return }
 
-        samplers[currentLayer].play(noteNumber: note, velocity: velocity, channel: channel)
+        let activeNotes = Set(layers.flatMap(\.activeNotes)).union([note])
+        appendRecentMelodyNote(note)
 
-        let activeNotes = layers.flatMap(\.activeNotes)
-        let snapshot = harmony.snapshot(activeNotes: Set(activeNotes), fallbackNote: note)
-        let harmonyNotes = harmony.harmonyNotes(for: note, snapshot: snapshot)
-        let harmonyVelocity = MIDIVelocity((Double(velocity) * 0.68).rounded().clamped(to: 1...127))
+        let result = harmony.harmonize(
+            melodyNote: note,
+            activeNotes: activeNotes,
+            recentNotes: recentMelodyNotes,
+            settings: harmonySettings
+        )
+        let melodyNote = harmony.correctedMelodyNote(note, settings: harmonySettings, snapshot: result.snapshot)
+        samplers[currentLayer].play(noteNumber: melodyNote, velocity: velocity, channel: channel)
+
+        let harmonyVelocity = MIDIVelocity((Double(velocity) * harmonySettings.velocityScale).rounded().clamped(to: 1...127))
         var generatedVoices: [(layer: Int, note: MIDINoteNumber, channel: MIDIChannel)] = []
 
-        for (offset, harmonyNote) in harmonyNotes.enumerated() {
+        for (offset, harmonyNote) in result.notes.enumerated() {
             let layer = (currentLayer + offset + 1) % samplers.count
             samplers[layer].play(noteNumber: harmonyNote, velocity: harmonyVelocity, channel: channel)
             generatedVoices.append((layer: layer, note: harmonyNote, channel: channel))
         }
 
-        harmonyVoicesBySourceNote[note] = generatedVoices
+        harmonyVoicesBySourceNote[note] = generatedVoices + [(layer: currentLayer, note: melodyNote, channel: channel)]
 
         DispatchQueue.main.async {
             self.layers[self.currentLayer].activeNotes.insert(note)
-            self.scaleLabel = snapshot.label
+            self.scaleLabel = result.snapshot.keyLabel
+            self.chordLabel = result.snapshot.chordLabel
+            self.harmonyLabel = self.harmonySettings.style.name
             self.visualizerBands.lastVelocity = (Double(velocity) / 127).clamped(to: 0...1)
             self.visualizerBands.amplitude = max(self.visualizerBands.amplitude, self.visualizerBands.lastVelocity)
             self.visualizerBands.bass = max(self.visualizerBands.bass, self.visualizerBands.lastVelocity * 0.55)
@@ -235,17 +252,15 @@ final class AudioManager: ObservableObject {
     }
 
     private func noteOff(_ note: MIDINoteNumber, channel: MIDIChannel) {
-        if samplers.indices.contains(currentLayer) {
+        if let generatedVoices = harmonyVoicesBySourceNote.removeValue(forKey: note) {
+            for voice in generatedVoices where samplers.indices.contains(voice.layer) {
+                samplers[voice.layer].stop(noteNumber: voice.note, channel: voice.channel)
+            }
+        } else if samplers.indices.contains(currentLayer) {
             samplers[currentLayer].stop(noteNumber: note, channel: channel)
         } else {
             for sampler in samplers {
                 sampler.stop(noteNumber: note, channel: channel)
-            }
-        }
-
-        if let generatedVoices = harmonyVoicesBySourceNote.removeValue(forKey: note) {
-            for voice in generatedVoices where samplers.indices.contains(voice.layer) {
-                samplers[voice.layer].stop(noteNumber: voice.note, channel: voice.channel)
             }
         }
 
@@ -269,6 +284,38 @@ final class AudioManager: ObservableObject {
                 self.lastPadIndex = nil
                 self.lastMIDIEvent = "Pad 1 + 16: all notes off"
             }
+            return true
+        }
+
+        if padIndex == 12 {
+            DispatchQueue.main.async {
+                self.lastPadIndex = padIndex
+                self.lastMIDIEvent = "Layer select"
+            }
+            return true
+        }
+
+        if padIndex == 13 {
+            DispatchQueue.main.async {
+                self.lastPadIndex = padIndex
+                self.lastMIDIEvent = "Harmony select"
+            }
+            return true
+        }
+
+        if activePadNotes.contains(padBaseNote + 12) {
+            guard padIndex < samplers.count else { return true }
+            selectLayer(padIndex)
+            DispatchQueue.main.async {
+                self.lastPadIndex = padIndex
+                self.lastMIDIEvent = "Layer \(self.currentLayer + 1)"
+            }
+            return true
+        }
+
+        if activePadNotes.contains(padBaseNote + 13) {
+            guard padIndex < HarmonyStyle.allCases.count else { return true }
+            selectHarmonyStyle(padIndex)
             return true
         }
 
@@ -303,8 +350,12 @@ final class AudioManager: ObservableObject {
                 self.controls.gravity = normalized
             case 73:
                 self.controls.particleSize = normalized
+                self.harmonySettings.spread = Int((normalized * 4).rounded()).clamped(to: 0...4)
+                self.harmonyLabel = "\(self.harmonySettings.style.name) S\(self.harmonySettings.spread)"
             case 72:
                 self.controls.trail = normalized
+                self.harmonySettings.maxVoices = Int((normalized * 4).rounded()).clamped(to: 1...4)
+                self.harmonyLabel = "\(self.harmonySettings.style.name) V\(self.harmonySettings.maxVoices)"
             default:
                 break
             }
@@ -321,6 +372,24 @@ final class AudioManager: ObservableObject {
 
     private func smooth(_ current: Double, toward next: Double) -> Double {
         current * 0.82 + next * 0.18
+    }
+
+    private func appendRecentMelodyNote(_ note: MIDINoteNumber) {
+        recentMelodyNotes.append(note)
+        if recentMelodyNotes.count > 12 {
+            recentMelodyNotes.removeFirst(recentMelodyNotes.count - 12)
+        }
+    }
+
+    private func selectHarmonyStyle(_ padIndex: Int) {
+        let styles = HarmonyStyle.allCases
+        let style = styles[padIndex % styles.count]
+        harmonySettings.style = style
+        DispatchQueue.main.async {
+            self.lastPadIndex = padIndex
+            self.harmonyLabel = style.name
+            self.lastMIDIEvent = "Harmony: \(style.name)"
+        }
     }
 }
 

@@ -50,9 +50,11 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 ### Harmony
 
 - Tracks active notes per layer.
-- Estimates a major or minor tonal center from active notes.
-- Generates harmony notes from scale degrees.
+- Estimates key and chord context from active/recent melody notes.
+- Generates diatonic harmony notes from scale degrees and detected chord tones.
 - Routes harmony voices across the other sampler layers.
+- Supports harmony styles: off, close thirds, open fifths, full triad, and dreamy.
+- Supports hardware-controlled voice count and spread.
 
 ### Visualizer
 
@@ -104,6 +106,8 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - The app must generate harmony voices in real time from incoming note-on events.
 - The app must keep generated notes within the valid MIDI note range.
 - The app should prefer diatonic harmony based on detected major/minor context.
+- The app should use recent note history and active notes to infer chord context.
+- The app should support live harmony preset changes from MiniLab controls.
 - The app should avoid blocking the MIDI callback with expensive analysis.
 
 ### Visualization
@@ -134,6 +138,8 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - A connected MiniLab Mk2 can trigger sound from the keyboard.
 - All 16 pads can select visible starter presets.
 - Holding pad 1 and pad 16 together stops active notes.
+- Holding pad 13 and pressing pads 1-4 changes the current layer.
+- Holding pad 14 and pressing pads 1-5 changes harmony mode.
 - Imported `.sf2` or `.dls` files can be loaded into a layer.
 - Visualizer meters and particles respond to played audio.
 - No crash when receiving unsupported MIDI messages.

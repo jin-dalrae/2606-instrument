@@ -38,8 +38,13 @@ struct ContentView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 6) {
-                Text(audio.scaleLabel)
+                Text("\(audio.scaleLabel)  \(audio.chordLabel)")
                     .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                Text(audio.harmonyLabel)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.72))
                 Text(audio.status)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.58))

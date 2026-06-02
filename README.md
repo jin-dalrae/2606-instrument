@@ -16,7 +16,7 @@ The app is designed for a Mac Mini or MacBook running fully on-device. No cloud 
 - Four performance layers for stacked sounds and harmony voices.
 - Built-in starter instrument presets loaded from the macOS system DLS sound bank.
 - Audio-layer support for `.sf2` and `.dls` instruments.
-- Rules-based harmony engine that estimates a major/minor tonal center from active notes and adds third, fifth, seventh, and extension voices.
+- Rules-based harmony engine that detects key/chord context and adds diatonic GarageBand-style harmony voices.
 - FFT-driven SwiftUI `Canvas` particle visualizer with bass, mid, treble, note velocity, and knob modulation.
 - Visualizer-first performance screen with a compact HUD and passive 16-pad instrument preview.
 
@@ -55,10 +55,12 @@ The current mapping is intentionally simple and easy to change in `AudioManager.
 | Keyboard | Note on/off | Plays the current sampler layer and triggers harmony on other layers |
 | Pads | Notes `36...51` | Select one of 16 starter instrument presets |
 | Pads | Hold notes `36` + `51` | Panic / all notes off |
+| Pads | Hold note `48` + pads `36...39` | Select layer 1-4 |
+| Pads | Hold note `49` + pads `36...40` | Select harmony mode: off, close 3rds, open 5ths, full triad, dreamy |
 | Knob | CC `74` | Visual brightness |
 | Knob | CC `71` | Visual gravity |
-| Knob | CC `73` | Visual particle size |
-| Knob | CC `72` | Visual trail length |
+| Knob | CC `73` | Visual particle size + harmony spread |
+| Knob | CC `72` | Visual trail length + harmony voice count |
 | MIDI | CC `120` or `123` | Panic / all notes off |
 
 If your MiniLab pad notes differ, update `padBaseNote` in `Sources/MiniLabParticleDJ/AudioManager.swift`.
@@ -106,6 +108,8 @@ swift build
 ```
 
 This project currently sets Swift language mode to Swift 5 in `Package.swift`. That keeps AudioKit callback code practical while still building with modern Swift toolchains. A later hardening pass can move the mutable audio/UI state behind explicit actor boundaries.
+
+AudioKit buffer length is set to `.short` before the engine starts for lower live MIDI latency.
 
 ## Roadmap
 
