@@ -15,10 +15,10 @@ The app is designed for a Mac Mini or MacBook running fully on-device. No cloud 
   - Knobs control visualizer behavior.
 - Four performance layers for stacked sounds and harmony voices.
 - Built-in starter instrument presets loaded from the macOS system DLS sound bank.
-- Runtime `.sf2` and `.dls` import for free SoundFont libraries.
+- Audio-layer support for `.sf2` and `.dls` instruments.
 - Rules-based harmony engine that estimates a major/minor tonal center from active notes and adds third, fifth, seventh, and extension voices.
 - FFT-driven SwiftUI `Canvas` particle visualizer with bass, mid, treble, note velocity, and knob modulation.
-- On-screen layer selector, pad grid, visual controls, and audio meters.
+- Visualizer-first performance screen with a compact HUD and passive 16-pad instrument preview.
 
 ## Requirements
 
@@ -54,10 +54,12 @@ The current mapping is intentionally simple and easy to change in `AudioManager.
 | --- | --- | --- |
 | Keyboard | Note on/off | Plays the current sampler layer and triggers harmony on other layers |
 | Pads | Notes `36...51` | Select one of 16 starter instrument presets |
+| Pads | Hold notes `36` + `51` | Panic / all notes off |
 | Knob | CC `74` | Visual brightness |
 | Knob | CC `71` | Visual gravity |
 | Knob | CC `73` | Visual particle size |
 | Knob | CC `72` | Visual trail length |
+| MIDI | CC `120` or `123` | Panic / all notes off |
 
 If your MiniLab pad notes differ, update `padBaseNote` in `Sources/MiniLabParticleDJ/AudioManager.swift`.
 
@@ -69,7 +71,7 @@ The starter presets use the macOS system DLS bank:
 /System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls
 ```
 
-You can also import `.sf2` or `.dls` files from the app using the folder button. Imported instruments load into the currently selected layer.
+The current UI is intentionally performance-focused and does not expose visible buttons. SoundFont loading support exists in the audio layer, while the visible screen prioritizes MiniLab control and visual output.
 
 For bundled SoundFont packs, place files under:
 

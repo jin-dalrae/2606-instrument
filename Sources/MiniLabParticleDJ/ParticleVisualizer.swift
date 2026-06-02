@@ -15,6 +15,7 @@ struct ParticleVisualizer: View {
 
     @State private var particles: [Particle] = []
     @State private var lastUpdate = Date()
+    @State private var lastTriggerID = 0
 
     var body: some View {
         TimelineView(.animation) { timeline in
@@ -35,7 +36,12 @@ struct ParticleVisualizer: View {
         let gravity = (controls.gravity - 0.5) * 90
         let center = CGPoint(x: size.width * 0.5, y: size.height * 0.52)
         let energy = max(bands.amplitude, bands.lastVelocity * 0.8)
-        let spawnCount = Int((8 + energy * 34 + bands.bass * 52).clamped(to: 6...90))
+        let triggerBurst = bands.triggerID != lastTriggerID
+        if triggerBurst {
+            lastTriggerID = bands.triggerID
+        }
+
+        let spawnCount = Int((18 + energy * 52 + bands.bass * 72 + (triggerBurst ? 140 : 0)).clamped(to: 12...220))
 
         for _ in 0..<spawnCount {
             let angle = Double.random(in: 0..<(Double.pi * 2))
@@ -92,6 +98,10 @@ struct ParticleVisualizer: View {
     }
 
     private func drawParticles(in context: inout GraphicsContext) {
+        if particles.isEmpty {
+            return
+        }
+
         for particle in particles {
             let alpha = particle.life.clamped(to: 0...1)
             let rect = CGRect(

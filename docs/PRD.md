@@ -65,11 +65,10 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 ### UI
 
 - Main performance screen with full-window particle visualizer.
-- Top status area for audio/MIDI state, last MIDI event, and detected harmony label.
-- Layer panel for selecting one of four layers.
-- Pad panel for selecting 16 starter instruments.
-- Controls panel for visual parameters and band meters.
-- File importer for loading `.sf2` and `.dls` files.
+- Full-window visualizer-first performance screen.
+- Compact HUD for audio/MIDI state, last MIDI event, current instrument, and detected harmony label.
+- Passive 16-pad instrument preview that mirrors MiniLab pad selection.
+- No visible performance buttons in the primary UI.
 
 ## User Stories
 
@@ -97,6 +96,7 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - The app must handle note-on and note-off events.
 - The app must map MiniLab-style pad notes to instrument presets.
 - The app must map selected CC messages to visual controls.
+- The app must support an all-notes-off path from hardware controls.
 - The app should tolerate unknown CC/program/aftertouch/system messages without failing.
 
 ### Harmony
@@ -115,9 +115,9 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 
 ### UI
 
-- The app must show current layer, active preset, app status, and last MIDI event.
-- The app must provide visible controls for layers, pads, visual parameters, and meters.
-- The app must support file import for SoundFont/DLS loading.
+- The app must show active preset, app status, and last MIDI event without covering the visualizer.
+- The app must keep the primary screen visualizer-first with no required mouse controls.
+- The app should expose instrument selection through the MiniLab pads.
 - The app should be usable at a desktop window size of at least `1120 x 720`.
 
 ## Non-Functional Requirements
@@ -133,6 +133,7 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - The app builds successfully with `swift build`.
 - A connected MiniLab Mk2 can trigger sound from the keyboard.
 - All 16 pads can select visible starter presets.
+- Holding pad 1 and pad 16 together stops active notes.
 - Imported `.sf2` or `.dls` files can be loaded into a layer.
 - Visualizer meters and particles respond to played audio.
 - No crash when receiving unsupported MIDI messages.
@@ -153,6 +154,7 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - Confirm default pad notes and knob CC values.
 - Add a MIDI monitor panel for discovering custom mappings.
 - Confirm note-off behavior for generated harmony voices.
+- Confirm pad 1 + pad 16 panic behavior on actual MiniLab hardware.
 
 ### M2: Instrument Workflow
 

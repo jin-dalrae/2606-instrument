@@ -18,6 +18,7 @@ struct VisualizerBands {
     var mid: Double = 0
     var treble: Double = 0
     var lastVelocity: Double = 0
+    var triggerID: Int = 0
 }
 
 struct PerformanceControls {
@@ -46,6 +47,9 @@ final class AudioManager: ObservableObject {
     private var samplers: [AppleSampler] = []
     private var fftTap: FFTTap?
     private var loadedCustomInstrumentURLs: [Int: URL] = [:]
+    private var harmonyVoicesBySourceNote: [MIDINoteNumber: [(layer: Int, note: MIDINoteNumber, channel: MIDIChannel)]] = [:]
+    private var activePadNotes: Set<MIDINoteNumber> = []
+    private var hasStarted = false
 
     init() {
         let presets = InstrumentPreset.starterPresets
@@ -64,8 +68,10 @@ final class AudioManager: ObservableObject {
     }
 
     func start() {
+        guard !hasStarted else { return }
         do {
             try engine.start()
+            hasStarted = true
             midi.openInput()
             configureFFT()
             loadStarterPresets()
@@ -73,6 +79,37 @@ final class AudioManager: ObservableObject {
         } catch {
             publishStatus("Engine failed: \(error.localizedDescription)")
         }
+    }
+
+    func stop() {
+        panic()
+        fftTap?.stop()
+        midi.closeAllInputs()
+        engine.stop()
+        hasStarted = false
+        publishStatus("Engine stopped.")
+    }
+
+    func panic() {
+        for sampler in samplers {
+            for note in MIDINoteNumber(0)...MIDINoteNumber(127) {
+                for channel in MIDIChannel(0)...MIDIChannel(15) {
+                    sampler.stop(noteNumber: note, channel: channel)
+                }
+            }
+        }
+
+        harmonyVoicesBySourceNote.removeAll()
+        DispatchQueue.main.async {
+            for layer in self.layers.indices {
+                self.layers[layer].activeNotes.removeAll()
+            }
+            self.lastMIDIEvent = "All notes off"
+        }
+    }
+
+    deinit {
+        stop()
     }
 
     func selectLayer(_ layer: Int) {
@@ -161,6 +198,7 @@ final class AudioManager: ObservableObject {
             self.visualizerBands.mid = self.smooth(self.visualizerBands.mid, toward: mid)
             self.visualizerBands.treble = self.smooth(self.visualizerBands.treble, toward: treble)
             self.visualizerBands.amplitude = self.smooth(self.visualizerBands.amplitude, toward: amplitude)
+            self.visualizerBands.lastVelocity *= 0.92
         }
     }
 
@@ -173,29 +211,41 @@ final class AudioManager: ObservableObject {
         let snapshot = harmony.snapshot(activeNotes: Set(activeNotes), fallbackNote: note)
         let harmonyNotes = harmony.harmonyNotes(for: note, snapshot: snapshot)
         let harmonyVelocity = MIDIVelocity((Double(velocity) * 0.68).rounded().clamped(to: 1...127))
+        var generatedVoices: [(layer: Int, note: MIDINoteNumber, channel: MIDIChannel)] = []
 
         for (offset, harmonyNote) in harmonyNotes.enumerated() {
             let layer = (currentLayer + offset + 1) % samplers.count
             samplers[layer].play(noteNumber: harmonyNote, velocity: harmonyVelocity, channel: channel)
+            generatedVoices.append((layer: layer, note: harmonyNote, channel: channel))
         }
+
+        harmonyVoicesBySourceNote[note] = generatedVoices
 
         DispatchQueue.main.async {
             self.layers[self.currentLayer].activeNotes.insert(note)
             self.scaleLabel = snapshot.label
             self.visualizerBands.lastVelocity = (Double(velocity) / 127).clamped(to: 0...1)
+            self.visualizerBands.amplitude = max(self.visualizerBands.amplitude, self.visualizerBands.lastVelocity)
+            self.visualizerBands.bass = max(self.visualizerBands.bass, self.visualizerBands.lastVelocity * 0.55)
+            self.visualizerBands.mid = max(self.visualizerBands.mid, self.visualizerBands.lastVelocity * 0.75)
+            self.visualizerBands.treble = max(self.visualizerBands.treble, self.visualizerBands.lastVelocity * 0.45)
+            self.visualizerBands.triggerID += 1
             self.lastMIDIEvent = "Note \(note) velocity \(velocity)"
         }
     }
 
     private func noteOff(_ note: MIDINoteNumber, channel: MIDIChannel) {
-        for sampler in samplers {
-            sampler.stop(noteNumber: note, channel: channel)
+        if samplers.indices.contains(currentLayer) {
+            samplers[currentLayer].stop(noteNumber: note, channel: channel)
+        } else {
+            for sampler in samplers {
+                sampler.stop(noteNumber: note, channel: channel)
+            }
         }
 
-        let snapshot = harmony.snapshot(activeNotes: Set(layers.flatMap(\.activeNotes)), fallbackNote: note)
-        for harmonyNote in harmony.harmonyNotes(for: note, snapshot: snapshot) {
-            for sampler in samplers {
-                sampler.stop(noteNumber: harmonyNote, channel: channel)
+        if let generatedVoices = harmonyVoicesBySourceNote.removeValue(forKey: note) {
+            for voice in generatedVoices where samplers.indices.contains(voice.layer) {
+                samplers[voice.layer].stop(noteNumber: voice.note, channel: voice.channel)
             }
         }
 
@@ -207,10 +257,20 @@ final class AudioManager: ObservableObject {
         }
     }
 
-    private func handlePad(note: MIDINoteNumber) -> Bool {
+    private func handlePadNoteOn(note: MIDINoteNumber) -> Bool {
         guard note >= padBaseNote else { return false }
         let padIndex = Int(note - padBaseNote)
         guard InstrumentPreset.starterPresets.indices.contains(padIndex) else { return false }
+
+        activePadNotes.insert(note)
+        if activePadNotes.contains(padBaseNote), activePadNotes.contains(padBaseNote + 15) {
+            panic()
+            DispatchQueue.main.async {
+                self.lastPadIndex = nil
+                self.lastMIDIEvent = "Pad 1 + 16: all notes off"
+            }
+            return true
+        }
 
         let preset = InstrumentPreset.starterPresets[padIndex]
         loadPreset(preset, into: currentLayer)
@@ -221,11 +281,22 @@ final class AudioManager: ObservableObject {
         return true
     }
 
+    private func handlePadNoteOff(note: MIDINoteNumber) -> Bool {
+        guard note >= padBaseNote else { return false }
+        let padIndex = Int(note - padBaseNote)
+        guard InstrumentPreset.starterPresets.indices.contains(padIndex) else { return false }
+
+        activePadNotes.remove(note)
+        return true
+    }
+
     private func handleControl(_ controller: MIDIByte, value: MIDIByte) {
         let normalized = Double(value) / 127
 
         DispatchQueue.main.async {
             switch controller {
+            case 120, 123:
+                self.panic()
             case 74:
                 self.controls.brightness = normalized
             case 71:
@@ -266,7 +337,7 @@ extension AudioManager: MIDIListener {
             return
         }
 
-        if !handlePad(note: noteNumber) {
+        if !handlePadNoteOn(note: noteNumber) {
             noteOn(noteNumber, velocity: velocity, channel: channel)
         }
     }
@@ -278,7 +349,9 @@ extension AudioManager: MIDIListener {
         portID: MIDIUniqueID?,
         timeStamp: MIDITimeStamp?
     ) {
-        noteOff(noteNumber, channel: channel)
+        if !handlePadNoteOff(note: noteNumber) {
+            noteOff(noteNumber, channel: channel)
+        }
     }
 
     func receivedMIDIController(
