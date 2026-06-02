@@ -11,9 +11,9 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 hud
                     .padding(22)
+                settingsPanel
+                    .padding(.horizontal, 22)
                 Spacer()
-                rhythmPanel
-                    .padding(20)
             }
         }
         .foregroundStyle(.white)
@@ -55,7 +55,7 @@ struct ContentView: View {
         .shadow(color: .black.opacity(0.55), radius: 10, y: 4)
     }
 
-    private var rhythmPanel: some View {
+    private var settingsPanel: some View {
         HStack(spacing: 16) {
             Toggle(isOn: $audio.loopEnabled) {
                 Image(systemName: "repeat")
