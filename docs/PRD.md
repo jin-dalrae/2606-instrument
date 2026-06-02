@@ -79,7 +79,7 @@ The implementation is a native macOS SwiftUI app powered by AudioKit 5. Performe
 - Scroll safety view wrapping all panels below the HUD to prevent truncation on smaller screens.
 - Compact HUD for audio/MIDI state, last MIDI event, current instrument, and detected harmony/scale label.
 - Key, scale, time-signature, custom playback toggles, and harmony-complexity controls.
-- **On-Screen Interactive Keyboard**: An interactive piano keyboard. Played notes sound in real-time, glow cyan, and write directly to the grand staff score.
+- **Smart On-Screen Chord Pads**: Eight diatonic chord pads adapt to the active key and scale. A click triggers a quantized one-shot note with auto-release, while the played pitch writes directly to the grand staff score.
 - **Real-Time Scrolling Note Score**: A scrolling grand staff displaying treble/bass clefs, Middle C ledger lines, color-coded layer note tracks, and active glows, synchronized with zero visual latency (playhead at `size.width - 60`).
 - **Instrument Selection Panel**: Dropdown menus to select and change the instrument preset of each of the 4 layers on-screen directly.
 - Particle-only visualizer without graph-style meters over the performance view.
@@ -144,7 +144,8 @@ The implementation is a native macOS SwiftUI app powered by AudioKit 5. Performe
 ## Success Metrics
 
 - The app builds successfully with `swift build`.
-- A connected MiniLab Mk2 can trigger sound from the keyboard.
+- A connected MiniLab Mk2 can trigger sound from the hardware keys and pads.
+- The on-screen chord pads can trigger quantized one-shot harmony figures without requiring click-and-hold input.
 - All 16 pads can select visible starter presets.
 - Holding pad 1 and pad 16 together stops active notes.
 - Holding pad 13 and pressing pads 1-4 changes the current layer.
@@ -183,4 +184,4 @@ The implementation is a native macOS SwiftUI app powered by AudioKit 5. Performe
 - Added visual scenes: Hyperdrive, Rain, Orbit, and Nebula.
 - Added native AppKit fullscreen mode.
 - Built-in Scrolling Played Note Score grand staff replacing the played event log.
-- Enforced ScrollView safety, on-screen keyboard trigger, and glassmorphic `.ultraThinMaterial` styling.
+- Enforced ScrollView safety, on-screen chord-pad trigger, and glassmorphic `.ultraThinMaterial` styling.

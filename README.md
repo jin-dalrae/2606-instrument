@@ -1,13 +1,13 @@
 # MiniLab Particle DJ
 
-MiniLab Particle DJ is a native macOS performance app for turning an Arturia MiniLab Mk2 into a compact synth, DJ, and VJ station. It combines low-latency local MIDI input, layered AudioKit samplers, automatic harmony, pad-based instrument switching, an interactive on-screen keyboard, a real-time scrolling note score, and a reactive particle visualizer in one SwiftUI app.
+MiniLab Particle DJ is a native macOS performance app for turning an Arturia MiniLab Mk2 into a compact synth, DJ, and VJ station. It combines low-latency local MIDI input, layered AudioKit samplers, automatic harmony, pad-based instrument switching, smart on-screen chord pads, a real-time scrolling note score, and a reactive particle visualizer in one SwiftUI app.
 
 The app is designed for a Mac Mini or MacBook running fully on-device. No cloud services are required for MIDI, audio generation, harmony, or visuals.
 
 ## Current Features
 
 - **Visualizer-First Glassmorphism**: Premium macOS `.ultraThinMaterial` styling with scrollable container safety to prevent UI truncation on smaller monitors (at least `1120 x 720`).
-- **On-Screen Interactive Keyboard**: An interactive piano keyboard on the screen. Play keys using the mouse or see them glow cyan when played via a connected MIDI controller. Clicking keys plays sounds and automatically writes notes to the scrolling played note score.
+- **Smart On-Screen Chord Pads**: Eight diatonic chord pads adapt to the active key and scale. Clicking a pad triggers a quantized one-shot note with auto-release, so you can fire harmonic ideas without holding the mouse down.
 - **Zero-Routing Audio**: Integrated AudioKit 5 audio graph with one `AudioEngine`, four `AppleSampler` layers, and a shared output `Mixer` running on-device without needing external DAWs or loopback drivers.
 - **Core MIDI Input**: Direct MIDI input handling with an active device monitor panel listing connected interfaces.
 - **Arturia MiniLab Mk2 Mappings**:
@@ -16,7 +16,7 @@ The app is designed for a Mac Mini or MacBook running fully on-device. No cloud 
   - Knobs modulate visualizer parameters (brightness, gravity, particle size, trails).
 - **Auto-Harmony Engine**: Rules-based engine that detects key/chord context and plays diatonic accompaniment voices arpeggiated across other layers.
 - **Real-Time Scrolling Note Score**: A scrolling grand staff displaying treble/bass clefs, Middle C ledger lines, color-coded layer note tracks, and active glows, synchronized with zero visual latency (playhead at `size.width - 60`).
-- **Performance Looper & Companion**: Captures played phrases and loops them up to five times with a gradual volume decay. Includes a step drum beat companion aligned to BPM and Time Signature.
+- **Performance Looper & Companion**: Captures played phrases and loops them up to five times with a gradual volume decay. Includes a step drum beat companion aligned to BPM and Time Signature. Looped phrases preserve the instrument that was captured with them.
 - **Instruments Preset Selection Panel**: Dropdown menus to select and load instruments for each layer directly on the screen.
 - **MIDI Learning Dashboard**: Remap any physical knob (CC) or pad (Note) directly from the visual settings tab. Mappings automatically persist in `UserDefaults`.
 
@@ -56,6 +56,7 @@ The default mapping is configured in `AudioManager.swift` and can be customized 
 | Control | MIDI | Behavior |
 | --- | --- | --- |
 | Keyboard | Note on/off | Plays current layer and triggers auto-harmony on other layers |
+| On-screen chord pads | Mouse click | Fires quantized one-shot chord tones with auto-release |
 | Pads | Notes `36...51` | Select instrument presets (Pads 1-16) |
 | Pads (Modifier) | Hold Pad 13 + Pads 1-4 | Select active synthesizer layer (1-4) |
 | Pads (Modifier) | Hold Pad 13 + Pad 15 | Toggle phrase loop playback (ON/OFF) |
@@ -78,7 +79,7 @@ The upper settings panel is grouped by purpose:
 - `Harmony`: Complexity, which controls arpeggiator density and micro-timing arpeggiations.
 - `MIDI`: Stepper for pad channel.
 
-When you play, the app captures the melody plus its generated harmony voices as a phrase. At the next measure, it repeats that phrase five times, fading away gradually.
+When you play, the app captures the melody plus its generated harmony voices as a phrase. At the next measure, it repeats that phrase five times, fading away gradually. On-screen chord pads fire quantized one-shot notes, so a single click is enough to launch the harmonic figure.
 
 ## Instruments
 

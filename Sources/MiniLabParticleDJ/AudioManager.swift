@@ -134,6 +134,8 @@ final class AudioManager: ObservableObject {
     private var phraseMeasureIndex = 0
     private var phraseScheduleGeneration = 0
     private var hasStarted = false
+    private var oneShotGeneration = 0
+    private var activeOneShotNote: (note: MIDINoteNumber, channel: MIDIChannel)?
 
     private var padChannel: MIDIChannel {
         MIDIChannel(max(0, min(15, padChannelNumber - 1)))
@@ -225,6 +227,8 @@ final class AudioManager: ObservableObject {
 
         loopGeneration += 1
         phraseScheduleGeneration += 1
+        oneShotGeneration += 1
+        activeOneShotNote = nil
         phraseNotes.removeAll()
         voicesBySourceNote.removeAll()
         startedNotes.removeAll()
@@ -244,6 +248,45 @@ final class AudioManager: ObservableObject {
     func selectLayer(_ layer: Int) {
         guard layers.indices.contains(layer) else { return }
         currentLayer = layer
+    }
+
+    func triggerQuantizedOneShotNote(
+        _ note: MIDINoteNumber,
+        velocity: MIDIVelocity = 100,
+        channel: MIDIChannel = 1,
+        quantizeToGrid: Bool = true
+    ) {
+        oneShotGeneration += 1
+        let generation = oneShotGeneration
+
+        if let activeOneShotNote {
+            noteOff(activeOneShotNote.note, channel: activeOneShotNote.channel)
+            self.activeOneShotNote = nil
+        }
+
+        let startDelay = quantizeToGrid ? delayToNextGridBoundary(from: Date()) : 0
+        let holdDuration = oneShotHoldDuration()
+
+        Task { @MainActor in
+            if startDelay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(startDelay * 1_000_000_000))
+            }
+
+            guard self.oneShotGeneration == generation else { return }
+
+            self.noteOn(note, velocity: velocity, channel: channel)
+            self.activeOneShotNote = (note, channel)
+
+            if holdDuration > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(holdDuration * 1_000_000_000))
+            }
+
+            guard self.oneShotGeneration == generation else { return }
+            guard self.activeOneShotNote?.note == note, self.activeOneShotNote?.channel == channel else { return }
+
+            self.noteOff(note, channel: channel)
+            self.activeOneShotNote = nil
+        }
     }
 
     func setLayerVolume(layer: Int, volume: Double) {
@@ -800,6 +843,9 @@ final class AudioManager: ObservableObject {
         for layer in self.layers.indices {
             self.layers[layer].activeNotes.remove(note)
         }
+        if activeOneShotNote?.note == note, activeOneShotNote?.channel == channel {
+            activeOneShotNote = nil
+        }
         self.lastMIDIEvent = "Note off \(note)"
     }
 
@@ -1136,6 +1182,21 @@ final class AudioManager: ObservableObject {
         let grid = gridStepDuration()
         guard grid > 0 else { return duration }
         return max(grid * 0.5, min(measureDuration() * 0.92, (duration / grid).rounded() * grid))
+    }
+
+    private func oneShotHoldDuration() -> TimeInterval {
+        guard tempoBPM > 0 else { return 0.75 }
+        let beatDuration = 60 / tempoBPM
+        let harmonyTail = gridStepDuration() * Double(max(2, harmonySettings.maxVoices + 1))
+        return max(beatDuration * 1.5, harmonyTail)
+    }
+
+    private func delayToNextGridBoundary(from date: Date) -> TimeInterval {
+        let grid = gridStepDuration()
+        guard grid > 0 else { return 0 }
+        let elapsed = date.timeIntervalSince(measureAnchor)
+        let offset = elapsed.truncatingRemainder(dividingBy: grid)
+        return offset <= 0 ? 0 : grid - offset
     }
 
     private func delayToNextMeasure(from date: Date) -> TimeInterval {

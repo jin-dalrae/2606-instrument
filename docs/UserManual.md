@@ -28,11 +28,11 @@ The main workspace is designed around a premium visualizer-first layout. The con
 
 To accommodate different monitor sizes and configurations (with a minimum height requirement of `720` points), all panels below the HUD are wrapped in a vertical scrolling list. The HUD remains pinned at the top for immediate feedback, while other controls can be scrolled if needed (such as when the MIDI Mapping panel is open).
 
-### On-Screen Interactive Keyboard
-An interactive, 2-octave piano keyboard is available in the center of the panels:
-*   **Play Keys**: Click and hold down any white or black key with the mouse to play the note. Release the mouse button to stop.
-*   **Glow Indicators**: Keys will glow in cyan when active (either clicked by the mouse or played via your connected MIDI controller).
-*   **Score Integration**: Any key clicked on the screen keyboard is played in real-time and automatically written/drawn on the **Played Note Score** grand staff below, spawning at the playhead line instantly.
+### Smart On-Screen Chord Pads
+Eight diatonic chord pads are available in the center of the panels:
+*   **Play Phrases**: Click a pad once to fire a quantized one-shot harmony figure. The note auto-releases after a tempo-based duration, so you do not need to click and hold.
+*   **Adaptive Labels**: Pad labels update with the selected key and scale, showing Roman numerals and chord names.
+*   **Score Integration**: Any pad click is played in real-time and automatically written/drawn on the **Played Note Score** grand staff below, spawning at the playhead line instantly.
 
 ### Played Note Score (Real-Time Grand Staff)
 The **Played Note Score** is a real-time grand staff piano roll displayed in the center of the panels:
@@ -44,7 +44,7 @@ The **Played Note Score** is a real-time grand staff piano roll displayed in the
 
 ### Instrument Selection Panel
 Each of the 4 sampler layers can have its instrument preset changed on the screen:
-*   **Active Indicator**: The currently active keyboard layer is highlighted with its specific theme color indicator dot and row border. Click on a layer row to select it as the active layer.
+*   **Active Indicator**: The currently active layer is highlighted with its specific theme color indicator dot and row border. Click on a layer row to select it as the active layer.
 *   **Preset Selection Dropdown**: Click on the preset selector dropdown next to the layer to choose a Melodic/Drum kit starter sound bank, or import custom `.sf2`/`.dls` libraries.
 
 ---
@@ -52,7 +52,7 @@ Each of the 4 sampler layers can have its instrument preset changed on the scree
 ## 3. The Auto-Harmony Engine
 
 ### Where is Auto Harmonic Play?
-Auto-harmony is **triggered automatically on your keyboard inputs**. When you play a melody on the current active layer, the harmony engine calculates appropriate accompaniment notes in real-time and plays them arpeggiated across the other three background sampler layers.
+Auto-harmony is **triggered automatically on your hardware keyboard inputs**. When you play a melody on the current active layer, the harmony engine calculates appropriate accompaniment notes in real-time and plays them arpeggiated across the other three background sampler layers.
 
 ### Harmony Modes & Selection
 You can cycle through 7 distinct harmony structures using your pads. 

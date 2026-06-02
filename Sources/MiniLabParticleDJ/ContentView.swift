@@ -48,7 +48,7 @@ struct ContentView: View {
                     VStack(spacing: 12) {
                         settingsPanel
                         
-                        PianoKeyboard()
+                        SmartChordsView()
                         
                         ScrollingScoreView()
                         
@@ -664,93 +664,31 @@ struct ContentView: View {
 
 }
 
-struct PianoKeyView: View {
-    @EnvironmentObject var audio: AudioManager
-    let note: UInt8
-    let isBlack: Bool
-    let width: CGFloat
-    let height: CGFloat
-    
-    @State private var isPressed = false
-    
-    var body: some View {
-        let isActive = audio.layers[audio.currentLayer].activeNotes.contains(note)
-        
-        UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 3, bottomTrailingRadius: 3, topTrailingRadius: 0)
-            .fill(isActive || isPressed ? Color.cyan.opacity(0.85) : (isBlack ? Color.black : Color.white))
-            .frame(width: width, height: height)
-            .shadow(color: isBlack ? .black.opacity(0.4) : .black.opacity(0.15), radius: 2, y: 2)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        if !isPressed {
-                            isPressed = true
-                            audio.noteOn(note, velocity: 100, channel: 1)
-                        }
-                    }
-                    .onEnded { _ in
-                        if isPressed {
-                            isPressed = false
-                            audio.noteOff(note, channel: 1)
-                        }
-                    }
-            )
-    }
+private struct DiatonicChordPad: Identifiable {
+    let id: Int
+    let romanNumeral: String
+    let displayName: String
+    let rootNote: MIDINoteNumber
 }
 
-struct BlackKey: Identifiable {
-    let id = UUID()
-    let note: UInt8
-    let offset: CGFloat
-}
+struct SmartChordsView: View {
+    @EnvironmentObject private var audio: AudioManager
+    @State private var activePadID: Int?
+    @State private var highlightGeneration = 0
 
-struct PianoKeyboard: View {
-    @EnvironmentObject var audio: AudioManager
-    
-    private let whiteKeys: [UInt8] = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79, 81, 83, 84]
-    
-    private let blackKeys: [BlackKey] = [
-        .init(note: 61, offset: 18),   // C#4
-        .init(note: 63, offset: 46),   // D#4
-        .init(note: 66, offset: 102),  // F#4
-        .init(note: 68, offset: 130),  // G#4
-        .init(note: 70, offset: 158),  // A#4
-        .init(note: 73, offset: 214),  // C#5
-        .init(note: 75, offset: 242),  // D#5
-        .init(note: 78, offset: 298),  // F#5
-        .init(note: 80, offset: 326),  // G#5
-        .init(note: 82, offset: 354)   // A#5
-    ]
-    
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("ON-SCREEN KEYBOARD")
+            Text("CHORD PADS")
                 .font(.caption.monospaced().weight(.bold))
                 .foregroundStyle(.white.opacity(0.62))
                 .padding(.leading, 10)
-            
-            ZStack(alignment: .topLeading) {
-                // White keys
-                HStack(spacing: 2) {
-                    ForEach(whiteKeys, id: \.self) { note in
-                        PianoKeyView(note: note, isBlack: false, width: 26, height: 80)
-                    }
-                }
-                
-                // Black keys overlay
-                ForEach(blackKeys) { item in
-                    PianoKeyView(note: item.note, isBlack: true, width: 18, height: 50)
-                        .offset(x: item.offset, y: 0)
+
+            ViewThatFits(in: .horizontal) {
+                chordStrip
+                ScrollView(.horizontal, showsIndicators: false) {
+                    chordStrip
                 }
             }
-            .frame(width: 418, height: 80)
-            .padding(6)
-            .background(.white.opacity(0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(.white.opacity(0.12), lineWidth: 1)
-            )
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -761,5 +699,116 @@ struct PianoKeyboard: View {
                 .stroke(.white.opacity(0.10), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
+    }
+
+    private var chordStrip: some View {
+        HStack(spacing: 8) {
+            ForEach(chordPads) { pad in
+                Button {
+                    triggerChord(pad)
+                } label: {
+                    VStack(spacing: 4) {
+                        Text(pad.romanNumeral)
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.65)
+
+                        Text(pad.displayName)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 96)
+                    .foregroundStyle(activePadID == pad.id ? .black : .white)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(activePadID == pad.id ? Color.cyan : Color.white.opacity(0.07))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(activePadID == pad.id ? Color.cyan.opacity(0.95) : Color.white.opacity(0.12), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(activePadID == pad.id ? 0.32 : 0.18), radius: 4, y: 2)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+                .scaleEffect(activePadID == pad.id ? 0.985 : 1)
+                .animation(.easeOut(duration: 0.12), value: activePadID)
+                .accessibilityLabel(pad.displayName)
+            }
+        }
+        .frame(minWidth: 0, maxWidth: .infinity)
+    }
+
+    private var chordPads: [DiatonicChordPad] {
+        let tonic = 60 + audio.keyRootIndex
+        let scale = scaleIntervals(for: audio.keyMode)
+
+        return (0..<8).map { index in
+            let scaleIndex = index % scale.count
+            let octave = index / scale.count
+            let root = clampMIDINote(tonic + scale[scaleIndex] + octave * 12)
+            return DiatonicChordPad(
+                id: index,
+                romanNumeral: romanNumeral(for: index, mode: audio.keyMode),
+                displayName: displayName(for: root, degree: index, mode: audio.keyMode),
+                rootNote: root
+            )
+        }
+    }
+
+    private func triggerChord(_ pad: DiatonicChordPad) {
+        activePadID = pad.id
+        highlightGeneration += 1
+        let generation = highlightGeneration
+
+        audio.triggerQuantizedOneShotNote(pad.rootNote, velocity: 100, channel: 1, quantizeToGrid: true)
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard highlightGeneration == generation, activePadID == pad.id else { return }
+            activePadID = nil
+        }
+    }
+
+    private func scaleIntervals(for mode: HarmonyEngine.ScaleMode) -> [Int] {
+        switch mode {
+        case .major:
+            return [0, 2, 4, 5, 7, 9, 11]
+        case .minor:
+            return [0, 2, 3, 5, 7, 8, 10]
+        case .pentatonic:
+            return [0, 2, 4, 7, 9]
+        }
+    }
+
+    private func romanNumeral(for degree: Int, mode: HarmonyEngine.ScaleMode) -> String {
+        switch mode {
+        case .major:
+            return ["I", "ii", "iii", "IV", "V", "vi", "vii°", "I"][degree]
+        case .minor:
+            return ["i", "ii°", "III", "iv", "v", "VI", "VII", "i"][degree]
+        case .pentatonic:
+            return ["I", "II", "III", "V", "VI", "I", "II", "III"][degree]
+        }
+    }
+
+    private func displayName(for note: MIDINoteNumber, degree: Int, mode: HarmonyEngine.ScaleMode) -> String {
+        let pitchNames = HarmonyEngine.KeySignature.pitchNames
+        let rootName = pitchNames[Int(note % 12)]
+
+        switch mode {
+        case .major:
+            return "\(rootName) \(["Maj", "min", "min", "Maj", "Maj", "min", "dim", "Maj"][degree])"
+        case .minor:
+            return "\(rootName) \(["min", "dim", "Maj", "min", "min", "Maj", "Maj", "min"][degree])"
+        case .pentatonic:
+            return rootName
+        }
+    }
+
+    private func clampMIDINote(_ value: Int) -> MIDINoteNumber {
+        MIDINoteNumber(max(0, min(127, value)))
     }
 }
