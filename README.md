@@ -81,7 +81,9 @@ The upper settings panel is grouped by purpose:
 - `Rhythm`: tempo in BPM and time signature.
 - `Key`: root note plus major, minor, or pentatonic scale.
 - `Harmony`: complexity, which controls harmony density and rhythmic movement.
-- `MIDI`: MiniLab pad channel for instrument changes.
+- `MIDI`: MiniLab pad channel for instrument changes. Pad channel auto-learns when pad-range notes arrive from a non-keyboard channel.
+
+The HUD shows the most recent MIDI messages so you can confirm note, CC, and channel values while pressing MiniLab controls.
 
 When you play within a measure, the app captures the melody plus its generated harmony voices as a phrase. At the next measure, it repeats that phrase five times on the selected time-signature grid. Each repeat is quieter than the previous one, so phrases fade away naturally instead of building forever.
 

@@ -33,6 +33,7 @@ struct ContentView: View {
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.58))
                     .lineLimit(1)
+                midiLog
                 playedLog
             }
 
@@ -161,7 +162,7 @@ struct ContentView: View {
 
     private var midiGroup: some View {
         settingGroup("MIDI") {
-            Stepper("Pad Channel \(audio.padChannelNumber)", value: $audio.padChannelNumber, in: 1...16)
+            Stepper("Pads Ch \(audio.padChannelNumber)", value: $audio.padChannelNumber, in: 1...16)
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .frame(width: 150)
         }
@@ -197,6 +198,18 @@ struct ContentView: View {
             }
         }
         .padding(.top, 4)
+    }
+
+    private var midiLog: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(audio.midiEvents.prefix(3)) { event in
+                Text(event.label)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.40))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.top, 3)
     }
 
 }

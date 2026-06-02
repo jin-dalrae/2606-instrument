@@ -36,6 +36,11 @@ struct PlayedEvent: Identifiable {
     let rhythmName: String
 }
 
+struct MIDIEventLog: Identifiable {
+    let id = UUID()
+    let label: String
+}
+
 private struct PerformanceVoice {
     let layer: Int
     let instrumentID: Int
@@ -84,6 +89,7 @@ final class AudioManager: ObservableObject {
     @Published var lastPadIndex: Int?
     @Published var playedEvents: [PlayedEvent] = []
     @Published var phraseStatus = "Phrase empty"
+    @Published var midiEvents: [MIDIEventLog] = []
 
     private let engine = AudioEngine()
     private let mixer = Mixer()
@@ -459,6 +465,13 @@ final class AudioManager: ObservableObject {
         return true
     }
 
+    private func learnPadsFrom(note: MIDINoteNumber, channel: MIDIChannel) {
+        guard !isLikelyKeyboardChannel(channel) else { return }
+        if note >= padBaseNote, note < padBaseNote + MIDINoteNumber(InstrumentPreset.starterPresets.count) {
+            padChannelNumber = Int(channel) + 1
+        }
+    }
+
     private func handlePadNoteOff(note: MIDINoteNumber) -> Bool {
         guard note >= padBaseNote else { return false }
         let padIndex = Int(note - padBaseNote)
@@ -770,6 +783,19 @@ final class AudioManager: ObservableObject {
         let octave = Int(note / 12) - 1
         return "\(names[Int(note % 12)])\(octave)"
     }
+
+    private func logMIDI(_ label: String) {
+        DispatchQueue.main.async {
+            self.midiEvents.insert(MIDIEventLog(label: label), at: 0)
+            if self.midiEvents.count > 6 {
+                self.midiEvents.removeLast(self.midiEvents.count - 6)
+            }
+        }
+    }
+
+    private func isLikelyKeyboardChannel(_ channel: MIDIChannel) -> Bool {
+        channel == 0
+    }
 }
 
 extension AudioManager: MIDIListener {
@@ -780,11 +806,13 @@ extension AudioManager: MIDIListener {
         portID: MIDIUniqueID?,
         timeStamp: MIDITimeStamp?
     ) {
+        logMIDI("on note \(noteNumber) ch \(channel + 1) vel \(velocity)")
         guard velocity > 0 else {
             noteOff(noteNumber, channel: channel)
             return
         }
 
+        learnPadsFrom(note: noteNumber, channel: channel)
         if channel == padChannel, handlePadNoteOn(note: noteNumber) {
             return
         } else {
@@ -799,6 +827,7 @@ extension AudioManager: MIDIListener {
         portID: MIDIUniqueID?,
         timeStamp: MIDITimeStamp?
     ) {
+        logMIDI("off note \(noteNumber) ch \(channel + 1)")
         if channel == padChannel, handlePadNoteOff(note: noteNumber) {
             return
         } else {
@@ -813,6 +842,7 @@ extension AudioManager: MIDIListener {
         portID: MIDIUniqueID?,
         timeStamp: MIDITimeStamp?
     ) {
+        logMIDI("cc \(controller) ch \(channel + 1) val \(value)")
         handleControl(controller, value: value)
     }
 
