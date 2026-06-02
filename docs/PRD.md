@@ -44,7 +44,8 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - AudioKit `MIDI` listens to Core MIDI inputs.
 - MIDI note-on plays the selected layer.
 - MIDI note-off stops the played note and generated harmony notes.
-- Pad notes `36...51` select instrument presets.
+- Pad notes `36...51` on the configured pad channel select the shared performance instrument used by melody and harmony layers.
+- Keyboard notes `36...51` remain playable melody notes and do not change instruments unless they arrive on the configured pad channel.
 - CC messages `71`, `72`, `73`, and `74` control visual parameters.
 
 ### Harmony
@@ -53,6 +54,7 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - Estimates key and chord context from active/recent melody notes.
 - Generates diatonic harmony notes from scale degrees and detected chord tones.
 - Routes harmony voices across the other sampler layers.
+- Mirrors the selected instrument across layers by default so harmonies feel like one coherent played instrument.
 - Supports harmony styles: off, close thirds, open fifths, full triad, and dreamy.
 - Supports hardware-controlled voice count and spread.
 
@@ -61,7 +63,7 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - AudioKit `FFTTap` analyzes the mixed output.
 - Bass, mid, and treble bands drive particle behavior.
 - Note velocity adds transient visual energy.
-- SwiftUI `Canvas` renders particles and meters.
+- SwiftUI `Canvas` renders particles.
 - Knobs control brightness, gravity, particle size, and trail feel.
 
 ### UI
@@ -69,8 +71,8 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - Main performance screen with full-window particle visualizer.
 - Full-window visualizer-first performance screen.
 - Compact HUD for audio/MIDI state, last MIDI event, current instrument, and detected harmony label.
-- Passive 16-pad instrument preview that mirrors MiniLab pad selection.
-- No visible performance buttons in the primary UI.
+- Compact rhythm controls for loop tempo, loop interval, and loop enablement.
+- Particle-only visualizer without graph-style meters over the performance view.
 
 ## User Stories
 
@@ -110,12 +112,21 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - The app should support live harmony preset changes from MiniLab controls.
 - The app should avoid blocking the MIDI callback with expensive analysis.
 
+### Looping
+
+- The app must capture played melody plus generated harmony voices after note release.
+- The app must repeat captured notes five times.
+- Each repeat must be quieter than the previous repeat.
+- The app must expose tempo and loop interval controls on screen.
+- Panic/all-notes-off must cancel future scheduled loop repeats.
+
 ### Visualization
 
 - The app must analyze mixer output with FFT.
 - The app must expose bass, mid, and treble energy to the UI.
 - The app must render particles continuously while the app is open.
 - The app must react to both audio energy and MIDI note velocity.
+- The app should not draw graph-style meters over the particle performance view.
 
 ### UI
 
@@ -141,7 +152,7 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - Holding pad 13 and pressing pads 1-4 changes the current layer.
 - Holding pad 14 and pressing pads 1-5 changes harmony mode.
 - Imported `.sf2` or `.dls` files can be loaded into a layer.
-- Visualizer meters and particles respond to played audio.
+- Particles respond to played audio and MIDI note velocity.
 - No crash when receiving unsupported MIDI messages.
 
 ## Risks and Open Questions

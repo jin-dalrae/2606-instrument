@@ -23,7 +23,6 @@ struct ParticleVisualizer: View {
                 updateParticles(at: timeline.date, size: size)
                 drawBackground(in: &context, size: size)
                 drawParticles(in: &context)
-                drawSpectrum(in: &context, size: size)
             }
         }
         .background(Color.black)
@@ -116,24 +115,6 @@ struct ParticleVisualizer: View {
         }
     }
 
-    private func drawSpectrum(in context: inout GraphicsContext, size: CGSize) {
-        let values = [bands.bass, bands.mid, bands.treble]
-        let colors = [
-            Color(red: 0.12, green: 0.72, blue: 1.0),
-            Color(red: 0.56, green: 0.92, blue: 0.42),
-            Color(red: 1.0, green: 0.38, blue: 0.66)
-        ]
-        let width = size.width * 0.16
-        let startX = size.width * 0.5 - width * 1.65
-        let y = size.height - 46
-
-        for index in values.indices {
-            let barHeight = 8 + values[index] * 58
-            let rect = CGRect(x: startX + CGFloat(index) * width * 1.1, y: y - barHeight, width: width, height: barHeight)
-            let path = RoundedRectangle(cornerRadius: 4).path(in: rect)
-            context.fill(path, with: .color(colors[index].opacity(0.72)))
-        }
-    }
 }
 
 private extension CGPoint {

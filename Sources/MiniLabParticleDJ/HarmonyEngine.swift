@@ -248,24 +248,26 @@ struct HarmonyEngine {
             return []
         case .closeThirds:
             return [
-                interval(from: melodyDegree, degreeOffset: 2, scale: scale),
-                interval(from: melodyDegree, degreeOffset: 4, scale: scale),
-                interval(from: melodyDegree, degreeOffset: 6, scale: scale)
+                interval(from: melodyDegree, degreeOffset: -2, scale: scale),
+                interval(from: melodyDegree, degreeOffset: -4, scale: scale),
+                interval(from: melodyDegree, degreeOffset: -6, scale: scale)
             ]
         case .openFifths:
             return [
-                interval(from: melodyDegree, degreeOffset: 4, scale: scale),
-                interval(from: melodyDegree, degreeOffset: 7 + max(0, spread - 1), scale: scale),
-                interval(from: melodyDegree, degreeOffset: -3, scale: scale)
+                interval(from: melodyDegree, degreeOffset: -4, scale: scale),
+                interval(from: melodyDegree, degreeOffset: -7 - max(0, spread - 1), scale: scale),
+                interval(from: melodyDegree, degreeOffset: -11, scale: scale)
             ]
         case .fullTriad:
             let targetDegrees = chordDegrees.filter { $0 != melodyDegree.index }
-            return targetDegrees.map { interval(from: melodyDegree, absoluteDegree: $0, scale: scale) }
+            return targetDegrees.map {
+                intervalToNearestChordToneBelow(melodyDegree: melodyDegree, chordDegree: $0, scale: scale)
+            }
         case .dreamy:
             return [
-                interval(from: melodyDegree, degreeOffset: 2, scale: scale),
-                interval(from: melodyDegree, degreeOffset: 4 + max(0, spread - 1), scale: scale),
-                interval(from: melodyDegree, degreeOffset: 9, scale: scale)
+                interval(from: melodyDegree, degreeOffset: -2, scale: scale),
+                interval(from: melodyDegree, degreeOffset: -4 - max(0, spread - 1), scale: scale),
+                interval(from: melodyDegree, degreeOffset: -9, scale: scale)
             ]
         }
     }
@@ -276,9 +278,23 @@ struct HarmonyEngine {
 
     private func interval(from melodyDegree: (index: Int, octave: Int), absoluteDegree: Int, scale: [Int]) -> Int {
         let melodySemitone = scale[wrappedDegree(melodyDegree.index, count: scale.count)] + melodyDegree.octave * 12
-        let targetOctave = floorDiv(absoluteDegree, scale.count)
-        let targetSemitone = scale[wrappedDegree(absoluteDegree, count: scale.count)] + targetOctave * 12
+        let targetIndex = wrappedDegree(absoluteDegree, count: scale.count)
+        let degreeOctaveOffset = floorDiv(absoluteDegree, scale.count)
+        let targetOctave = melodyDegree.octave + degreeOctaveOffset
+        let targetSemitone = scale[targetIndex] + targetOctave * 12
         return targetSemitone - melodySemitone
+    }
+
+    private func intervalToNearestChordToneBelow(melodyDegree: (index: Int, octave: Int), chordDegree: Int, scale: [Int]) -> Int {
+        let melodySemitone = scale[wrappedDegree(melodyDegree.index, count: scale.count)] + melodyDegree.octave * 12
+        let targetIndex = wrappedDegree(chordDegree, count: scale.count)
+        let candidates = (melodyDegree.octave - 3...melodyDegree.octave).map { octave in
+            scale[targetIndex] + octave * 12
+        }
+        let target = candidates
+            .filter { $0 < melodySemitone - 1 }
+            .max() ?? candidates.min { abs($0 - melodySemitone) < abs($1 - melodySemitone) } ?? melodySemitone
+        return target - melodySemitone
     }
 
     private func nearestScaleDegree(for note: MIDINoteNumber, in key: KeySignature) -> (index: Int, octave: Int) {

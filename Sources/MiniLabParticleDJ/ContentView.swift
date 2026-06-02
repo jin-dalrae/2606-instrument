@@ -12,8 +12,8 @@ struct ContentView: View {
                 hud
                     .padding(22)
                 Spacer()
-                instrumentPadPreview
-                    .padding(18)
+                rhythmPanel
+                    .padding(20)
             }
         }
         .foregroundStyle(.white)
@@ -54,33 +54,44 @@ struct ContentView: View {
         .shadow(color: .black.opacity(0.55), radius: 10, y: 4)
     }
 
-    private var instrumentPadPreview: some View {
-        LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(minimum: 42, maximum: 78), spacing: 8), count: 8),
-            spacing: 8
-        ) {
-            ForEach(InstrumentPreset.starterPresets) { preset in
-                VStack(spacing: 4) {
-                    Text("\(preset.id + 1)")
-                        .font(.caption2.monospaced().weight(.bold))
-                        .foregroundStyle(.white.opacity(0.56))
-                    Text(preset.name)
-                        .font(.system(size: 10, weight: .semibold))
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.7)
-                }
-                .frame(maxWidth: .infinity, minHeight: 46)
-                .background(padFill(for: preset), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(.white.opacity(activeLayer.preset.id == preset.id ? 0.38 : 0.10), lineWidth: 1)
-                )
+    private var rhythmPanel: some View {
+        HStack(spacing: 16) {
+            Toggle(isOn: $audio.loopEnabled) {
+                Image(systemName: "repeat")
             }
+            .toggleStyle(.switch)
+            .labelsHidden()
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text("Speed")
+                        .font(.caption.monospaced().weight(.bold))
+                        .foregroundStyle(.white.opacity(0.62))
+                    Text("\(Int(audio.tempoBPM.rounded())) BPM")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                }
+
+                Slider(value: $audio.tempoBPM, in: 56...168, step: 1)
+                    .frame(width: 220)
+                    .tint(.cyan)
+            }
+
+            Picker("Rhythm", selection: $audio.loopBeats) {
+                Text("2 beat").tag(2.0)
+                Text("4 beat").tag(4.0)
+                Text("8 beat").tag(8.0)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 250)
         }
-        .frame(maxWidth: 680)
-        .opacity(0.78)
-        .shadow(color: .black.opacity(0.45), radius: 12, y: 5)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.white.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
     }
 
     private var activeLayer: LayerState {
@@ -90,15 +101,4 @@ struct ContentView: View {
         return audio.layers[audio.currentLayer]
     }
 
-    private func padFill(for preset: InstrumentPreset) -> Color {
-        if activeLayer.preset.id == preset.id {
-            return Color(red: 0.12, green: 0.58, blue: 0.92).opacity(0.72)
-        }
-
-        if audio.lastPadIndex == preset.id {
-            return Color(red: 0.92, green: 0.28, blue: 0.46).opacity(0.62)
-        }
-
-        return .black.opacity(0.24)
-    }
 }

@@ -11,14 +11,16 @@ The app is designed for a Mac Mini or MacBook running fully on-device. No cloud 
 - Core MIDI input through AudioKit `MIDI`.
 - Arturia MiniLab Mk2-friendly mapping:
   - Keys play the selected layer.
-  - Pads select instruments for the selected layer.
+  - Pads select the performance instrument used by the melody and harmony layers.
   - Knobs control visualizer behavior.
-- Four performance layers for stacked sounds and harmony voices.
+- Four performance layers for melody plus automatically generated harmony voices.
 - Built-in starter instrument presets loaded from the macOS system DLS sound bank.
 - Audio-layer support for `.sf2` and `.dls` instruments.
 - Rules-based harmony engine that detects key/chord context and adds diatonic GarageBand-style harmony voices.
 - FFT-driven SwiftUI `Canvas` particle visualizer with bass, mid, treble, note velocity, and knob modulation.
-- Visualizer-first performance screen with a compact HUD and passive 16-pad instrument preview.
+- Visualizer-first performance screen with a compact HUD and rhythm controls.
+- Particle-only visualizer; graph-style meters are intentionally not drawn over the performance view.
+- Echo looper that repeats played notes and harmonies five times, fading quieter on each repeat.
 
 ## Requirements
 
@@ -53,17 +55,29 @@ The current mapping is intentionally simple and easy to change in `AudioManager.
 | Control | MIDI | Behavior |
 | --- | --- | --- |
 | Keyboard | Note on/off | Plays the current sampler layer and triggers harmony on other layers |
-| Pads | Notes `36...51` | Select one of 16 starter instrument presets |
-| Pads | Hold notes `36` + `51` | Panic / all notes off |
-| Pads | Hold note `48` + pads `36...39` | Select layer 1-4 |
-| Pads | Hold note `49` + pads `36...40` | Select harmony mode: off, close 3rds, open 5ths, full triad, dreamy |
+| Pads on MIDI channel 10 | Notes `36...51` | Select one of 16 starter instrument presets for melody + harmony |
+| Pads on MIDI channel 10 | Hold notes `36` + `51` | Panic / all notes off |
+| Pads on MIDI channel 10 | Hold note `48` + pads `36...39` | Select layer 1-4 |
+| Pads on MIDI channel 10 | Hold note `49` + pads `36...40` | Select harmony mode: off, close 3rds, open 5ths, full triad, dreamy |
 | Knob | CC `74` | Visual brightness |
 | Knob | CC `71` | Visual gravity |
 | Knob | CC `73` | Visual particle size + harmony spread |
 | Knob | CC `72` | Visual trail length + harmony voice count |
 | MIDI | CC `120` or `123` | Panic / all notes off |
 
-If your MiniLab pad notes differ, update `padBaseNote` in `Sources/MiniLabParticleDJ/AudioManager.swift`.
+If your MiniLab pad notes differ, update `padBaseNote` in `Sources/MiniLabParticleDJ/AudioManager.swift`. If instruments do not change from the pads, set the MiniLab pads to MIDI channel 10 in Arturia MIDI Control Center or update `padChannel` in `AudioManager.swift`.
+
+Keyboard notes in the `36...51` range are treated as music, not instrument selection, unless they arrive on the configured pad channel.
+
+## Looping
+
+The bottom rhythm control sets the loop timing:
+
+- `Speed`: tempo in BPM.
+- `Rhythm`: repeat interval in beats.
+- Repeat switch: enables or disables the echo looper.
+
+When you play and release a note, the app loops the melody plus its generated harmony voices five times. Each repeat is quieter than the previous one, so phrases fade away naturally instead of building forever.
 
 ## Instruments
 
@@ -73,7 +87,7 @@ The starter presets use the macOS system DLS bank:
 /System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls
 ```
 
-The current UI is intentionally performance-focused and does not expose visible buttons. SoundFont loading support exists in the audio layer, while the visible screen prioritizes MiniLab control and visual output.
+The current UI is intentionally performance-focused. SoundFont loading support exists in the audio layer, while the visible screen prioritizes MiniLab control, rhythm settings, and visual output.
 
 For bundled SoundFont packs, place files under:
 
