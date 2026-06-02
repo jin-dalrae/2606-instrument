@@ -54,6 +54,13 @@ private struct StartedPerformanceNote {
     let voices: [PerformanceVoice]
 }
 
+private struct CapturedPhraseNote {
+    let startOffset: TimeInterval
+    let duration: TimeInterval
+    let sourceVelocity: MIDIVelocity
+    let voices: [PerformanceVoice]
+}
+
 final class AudioManager: ObservableObject {
     let padBaseNote: MIDINoteNumber = 36
 
@@ -76,6 +83,7 @@ final class AudioManager: ObservableObject {
     @Published var lastMIDIEvent = "Waiting for MiniLab Mk2"
     @Published var lastPadIndex: Int?
     @Published var playedEvents: [PlayedEvent] = []
+    @Published var phraseStatus = "Phrase empty"
 
     private let engine = AudioEngine()
     private let mixer = Mixer()
@@ -95,6 +103,9 @@ final class AudioManager: ObservableObject {
     private var drumGeneration = 0
     private var currentPreset = InstrumentPreset.starterPresets[0]
     private var measureAnchor = Date()
+    private var phraseNotes: [CapturedPhraseNote] = []
+    private var phraseMeasureIndex = 0
+    private var phraseScheduleGeneration = 0
     private var hasStarted = false
 
     private var padChannel: MIDIChannel {
@@ -166,6 +177,8 @@ final class AudioManager: ObservableObject {
         }
 
         loopGeneration += 1
+        phraseScheduleGeneration += 1
+        phraseNotes.removeAll()
         voicesBySourceNote.removeAll()
         startedNotes.removeAll()
         recentMelodyNotes.removeAll()
@@ -173,6 +186,7 @@ final class AudioManager: ObservableObject {
             for layer in self.layers.indices {
                 self.layers[layer].activeNotes.removeAll()
             }
+            self.phraseStatus = "Phrase empty"
             self.lastMIDIEvent = "All notes off"
         }
     }
@@ -377,7 +391,7 @@ final class AudioManager: ObservableObject {
 
         if let startedNote {
             let duration = max(0.06, min(8, Date().timeIntervalSince(startedNote.startedAt)))
-            scheduleLoopEchoes(for: startedNote, duration: quantizedDuration(duration))
+            capturePhraseNote(startedNote, duration: quantizedDuration(duration))
             recordPlayedEvent(note: note, startedNote: startedNote)
         }
 
@@ -537,25 +551,63 @@ final class AudioManager: ObservableObject {
         return beat / (harmonyComplexity > 0.70 ? 2 : 1)
     }
 
-    private func scheduleLoopEchoes(for startedNote: StartedPerformanceNote, duration: TimeInterval) {
+    private func capturePhraseNote(_ startedNote: StartedPerformanceNote, duration: TimeInterval) {
         guard loopEnabled, tempoBPM > 0 else { return }
 
-        let generation = loopGeneration
+        let measureIndex = currentMeasureIndex()
+        if measureIndex != phraseMeasureIndex {
+            phraseNotes.removeAll()
+            phraseMeasureIndex = measureIndex
+        }
+
+        phraseNotes.append(
+            CapturedPhraseNote(
+                startOffset: startedNote.startOffset,
+                duration: duration,
+                sourceVelocity: startedNote.sourceVelocity,
+                voices: startedNote.voices
+            )
+        )
+
+        DispatchQueue.main.async {
+            self.phraseStatus = "Phrase \(self.phraseNotes.count) note\(self.phraseNotes.count == 1 ? "" : "s")"
+        }
+        scheduleCurrentPhraseIfNeeded()
+    }
+
+    private func scheduleCurrentPhraseIfNeeded() {
+        phraseScheduleGeneration += 1
+        let generation = phraseScheduleGeneration
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delayToNextMeasure(from: Date())) { [weak self] in
+            guard let self, self.hasStarted, self.loopEnabled, self.phraseScheduleGeneration == generation else { return }
+            self.schedulePhraseRepeats(notes: self.phraseNotes, generation: self.loopGeneration)
+        }
+    }
+
+    private func schedulePhraseRepeats(notes: [CapturedPhraseNote], generation: Int) {
+        guard !notes.isEmpty else { return }
+
         let loopInterval = measureDuration()
-        let replayDuration = min(duration, loopInterval * 0.92)
-        let firstMeasureDelay = delayToNextMeasure(from: Date())
+        phraseNotes.removeAll()
+        DispatchQueue.main.async {
+            self.phraseStatus = "Looping phrase"
+        }
 
         for repeatIndex in 1...5 {
-            let delay = firstMeasureDelay + startedNote.startOffset + loopInterval * Double(repeatIndex - 1)
             let gain = pow(0.88, Double(repeatIndex))
+            for note in notes {
+                let delay = note.startOffset + loopInterval * Double(repeatIndex - 1)
+                let replayDuration = min(note.duration, loopInterval * 0.92)
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.hasStarted, self.loopGeneration == generation else { return }
-                self.playLoopVoices(startedNote.voices, sourceVelocity: startedNote.sourceVelocity, gain: gain)
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self, self.hasStarted, self.loopGeneration == generation else { return }
+                    self.playLoopVoices(note.voices, sourceVelocity: note.sourceVelocity, gain: gain)
 
-                DispatchQueue.main.asyncAfter(deadline: .now() + replayDuration) { [weak self] in
-                    guard let self, self.loopGeneration == generation else { return }
-                    self.stopLoopVoices(startedNote.voices)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + replayDuration) { [weak self] in
+                        guard let self, self.loopGeneration == generation else { return }
+                        self.stopLoopVoices(note.voices)
+                    }
                 }
             }
         }
@@ -678,6 +730,12 @@ final class AudioManager: ObservableObject {
         let elapsed = date.timeIntervalSince(measureAnchor)
         let offset = elapsed.truncatingRemainder(dividingBy: measure)
         return offset <= 0 ? 0 : measure - offset
+    }
+
+    private func currentMeasureIndex() -> Int {
+        let measure = measureDuration()
+        guard measure > 0 else { return 0 }
+        return max(0, Int(Date().timeIntervalSince(measureAnchor) / measure))
     }
 
     private func selectHarmonyStyle(_ padIndex: Int) {

@@ -50,6 +50,9 @@ struct ContentView: View {
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.58))
                     .lineLimit(1)
+                Text(audio.phraseStatus)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.58))
             }
         }
         .shadow(color: .black.opacity(0.55), radius: 10, y: 4)

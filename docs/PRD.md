@@ -120,8 +120,8 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 
 ### Looping
 
-- The app must capture played melody plus generated harmony voices after note release.
-- The app must repeat captured notes five times.
+- The app must collect notes released inside the current measure into a phrase buffer.
+- The app must repeat captured phrase notes five times as one bar-aligned phrase.
 - Each repeat must be quieter than the previous repeat.
 - The app must fade repeats gradually enough that previous phrases remain audible while new instruments are selected.
 - The app must preserve the captured instrument timbre for scheduled repeats even after the live instrument changes.

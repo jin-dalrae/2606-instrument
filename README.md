@@ -24,7 +24,7 @@ The app is designed for a Mac Mini or MacBook running fully on-device. No cloud 
 - Key, scale, time-signature, BPM, drum, and harmony-complexity controls.
 - Basic drum rhythm plus a selectable Drum Kit instrument.
 - Played-event log showing the note, instrument, harmony mode, and rhythm used for recent phrases.
-- Measure-aware looping: repeats are quantized to the selected time signature instead of firing at arbitrary release times.
+- Phrase-level looping: notes captured in a measure are replayed together as a bar-aligned phrase.
 
 ## Requirements
 
@@ -86,7 +86,7 @@ The bottom rhythm control sets the loop timing:
 - `Drums`: enables or disables the built-in beat.
 - `Pad Ch`: MIDI channel used for MiniLab pad instrument changes.
 
-When you play and release a note, the app loops the melody plus its generated harmony voices five times. Repeats are aligned to the next measure using the selected time signature and BPM. Each repeat is quieter than the previous one, so phrases fade away naturally instead of building forever.
+When you play within a measure, the app captures the melody plus its generated harmony voices as a phrase. At the next measure, it repeats that phrase five times on the selected time-signature grid. Each repeat is quieter than the previous one, so phrases fade away naturally instead of building forever.
 
 Looped phrases keep the instrument they were recorded with. If you play a piano phrase, switch to strings, and play another phrase, the older piano loop stays piano.
 
