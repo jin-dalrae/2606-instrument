@@ -8,6 +8,7 @@ struct InstrumentPreset: Identifiable, Hashable {
     let bankLSB: UInt8
 
     static let melodicBankMSB: UInt8 = 0x79
+    static let percussionBankMSB: UInt8 = 0x78
 
     static let starterPresets: [InstrumentPreset] = [
         .init(id: 0, name: "Grand Piano", program: 0, bankMSB: melodicBankMSB, bankLSB: 0),
@@ -25,7 +26,31 @@ struct InstrumentPreset: Identifiable, Hashable {
         .init(id: 12, name: "Brass", program: 61, bankMSB: melodicBankMSB, bankLSB: 0),
         .init(id: 13, name: "Flute", program: 73, bankMSB: melodicBankMSB, bankLSB: 0),
         .init(id: 14, name: "Pluck", program: 45, bankMSB: melodicBankMSB, bankLSB: 0),
-        .init(id: 15, name: "Atmosphere", program: 99, bankMSB: melodicBankMSB, bankLSB: 0)
+        .init(id: 15, name: "Drum Kit", program: 0, bankMSB: percussionBankMSB, bankLSB: 0)
+    ]
+}
+
+struct TimeSignatureOption: Identifiable, Hashable {
+    let beats: Int
+    let beatUnit: Int
+
+    var id: String {
+        label
+    }
+
+    var label: String {
+        "\(beats)/\(beatUnit)"
+    }
+
+    var measureBeatsInQuarterNotes: Double {
+        Double(beats) * (4 / Double(beatUnit))
+    }
+
+    static let options: [TimeSignatureOption] = [
+        .init(beats: 4, beatUnit: 4),
+        .init(beats: 3, beatUnit: 4),
+        .init(beats: 6, beatUnit: 8),
+        .init(beats: 3, beatUnit: 8)
     ]
 }
 

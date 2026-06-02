@@ -28,8 +28,17 @@ struct PerformanceControls {
     var trail: Double = 0.68
 }
 
+struct PlayedEvent: Identifiable {
+    let id = UUID()
+    let noteName: String
+    let instrumentName: String
+    let harmonyName: String
+    let rhythmName: String
+}
+
 private struct PerformanceVoice {
     let layer: Int
+    let instrumentID: Int
     let note: MIDINoteNumber
     let channel: MIDIChannel
     let velocityRatio: Double
@@ -38,6 +47,9 @@ private struct PerformanceVoice {
 private struct StartedPerformanceNote {
     let startedAt: Date
     let sourceVelocity: MIDIVelocity
+    let instrumentName: String
+    let harmonyName: String
+    let rhythmName: String
     let voices: [PerformanceVoice]
 }
 
@@ -50,20 +62,27 @@ final class AudioManager: ObservableObject {
     @Published var visualizerBands = VisualizerBands()
     @Published var controls = PerformanceControls()
     @Published var tempoBPM: Double = 96
-    @Published var loopBeats: Double = 4
+    @Published var selectedTimeSignature = TimeSignatureOption.options[0]
     @Published var loopEnabled = true
+    @Published var drumEnabled = true
+    @Published var harmonyComplexity: Double = 0.45
+    @Published var keyRootIndex = 0
+    @Published var keyMode = HarmonyEngine.ScaleMode.major
     @Published var scaleLabel = "C Major"
     @Published var chordLabel = "No Chord"
     @Published var harmonyLabel = "Close 3rds"
     @Published var status = "Audio engine idle"
     @Published var lastMIDIEvent = "Waiting for MiniLab Mk2"
     @Published var lastPadIndex: Int?
+    @Published var playedEvents: [PlayedEvent] = []
 
     private let engine = AudioEngine()
     private let mixer = Mixer()
     private let midi = MIDI()
     private let harmony = HarmonyEngine()
     private var samplers: [AppleSampler] = []
+    private var loopSamplers: [AppleSampler] = []
+    private let drumSampler = AppleSampler()
     private var fftTap: FFTTap?
     private var loadedCustomInstrumentURLs: [Int: URL] = [:]
     private var voicesBySourceNote: [MIDINoteNumber: [PerformanceVoice]] = [:]
@@ -72,6 +91,8 @@ final class AudioManager: ObservableObject {
     private var recentMelodyNotes: [MIDINoteNumber] = []
     private var harmonySettings = HarmonySettings()
     private var loopGeneration = 0
+    private var drumGeneration = 0
+    private var currentPreset = InstrumentPreset.starterPresets[0]
     private var hasStarted = false
 
     init() {
@@ -90,6 +111,13 @@ final class AudioManager: ObservableObject {
             mixer.addInput(sampler)
         }
 
+        for _ in InstrumentPreset.starterPresets {
+            let sampler = AppleSampler()
+            loopSamplers.append(sampler)
+            mixer.addInput(sampler)
+        }
+
+        mixer.addInput(drumSampler)
         engine.output = mixer
         midi.addListener(self)
     }
@@ -102,6 +130,9 @@ final class AudioManager: ObservableObject {
             midi.openInput()
             configureFFT()
             loadStarterPresets()
+            loadLoopPresets()
+            loadDrums()
+            startDrumLoop()
             publishStatus("Engine running. Listening to Core MIDI inputs.")
         } catch {
             publishStatus("Engine failed: \(error.localizedDescription)")
@@ -110,6 +141,7 @@ final class AudioManager: ObservableObject {
 
     func stop() {
         panic()
+        drumGeneration += 1
         fftTap?.stop()
         midi.closeAllInputs()
         engine.stop()
@@ -118,7 +150,7 @@ final class AudioManager: ObservableObject {
     }
 
     func panic() {
-        for sampler in samplers {
+        for sampler in samplers + loopSamplers + [drumSampler] {
             for note in MIDINoteNumber(0)...MIDINoteNumber(127) {
                 for channel in MIDIChannel(0)...MIDIChannel(15) {
                     sampler.stop(noteNumber: note, channel: channel)
@@ -199,7 +231,36 @@ final class AudioManager: ObservableObject {
         }
     }
 
+    private func loadLoopPresets() {
+        for preset in InstrumentPreset.starterPresets where loopSamplers.indices.contains(preset.id) {
+            do {
+                try loopSamplers[preset.id].samplerUnit.loadSoundBankInstrument(
+                    at: StarterSoundBank.systemDLSURL,
+                    program: preset.program,
+                    bankMSB: preset.bankMSB,
+                    bankLSB: preset.bankLSB
+                )
+            } catch {
+                publishStatus("Could not load loop \(preset.name): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func loadDrums() {
+        do {
+            try drumSampler.samplerUnit.loadSoundBankInstrument(
+                at: StarterSoundBank.systemDLSURL,
+                program: 0,
+                bankMSB: 0x78,
+                bankLSB: 0
+            )
+        } catch {
+            publishStatus("Could not load drum kit: \(error.localizedDescription)")
+        }
+    }
+
     private func loadPerformancePreset(_ preset: InstrumentPreset) {
+        currentPreset = preset
         for layer in samplers.indices {
             loadPreset(preset, into: layer)
         }
@@ -241,6 +302,7 @@ final class AudioManager: ObservableObject {
     private func noteOn(_ note: MIDINoteNumber, velocity: MIDIVelocity, channel: MIDIChannel) {
         guard samplers.indices.contains(currentLayer) else { return }
 
+        applyHarmonyControls()
         let activeNotes = Set(layers.flatMap(\.activeNotes)).union([note])
         appendRecentMelodyNote(note)
 
@@ -255,23 +317,31 @@ final class AudioManager: ObservableObject {
 
         let harmonyVelocity = MIDIVelocity((Double(velocity) * harmonySettings.velocityScale).rounded().clamped(to: 1...127))
         var voices: [PerformanceVoice] = [
-            PerformanceVoice(layer: currentLayer, note: melodyNote, channel: channel, velocityRatio: 1)
+            PerformanceVoice(layer: currentLayer, instrumentID: currentPreset.id, note: melodyNote, channel: channel, velocityRatio: 1)
         ]
 
         for (offset, harmonyNote) in result.notes.enumerated() {
             let layer = (currentLayer + offset + 1) % samplers.count
             samplers[layer].play(noteNumber: harmonyNote, velocity: harmonyVelocity, channel: channel)
-            voices.append(PerformanceVoice(layer: layer, note: harmonyNote, channel: channel, velocityRatio: harmonySettings.velocityScale))
+            voices.append(PerformanceVoice(layer: layer, instrumentID: currentPreset.id, note: harmonyNote, channel: channel, velocityRatio: harmonySettings.velocityScale))
         }
 
         voicesBySourceNote[note] = voices
-        startedNotes[note] = StartedPerformanceNote(startedAt: Date(), sourceVelocity: velocity, voices: voices)
+        startedNotes[note] = StartedPerformanceNote(
+            startedAt: Date(),
+            sourceVelocity: velocity,
+            instrumentName: currentPreset.name,
+            harmonyName: harmonySettings.style.name,
+            rhythmName: selectedTimeSignature.label,
+            voices: voices
+        )
+        scheduleGridHarmony(from: voices, sourceVelocity: velocity)
 
         DispatchQueue.main.async {
             self.layers[self.currentLayer].activeNotes.insert(note)
             self.scaleLabel = result.snapshot.keyLabel
             self.chordLabel = result.snapshot.chordLabel
-            self.harmonyLabel = self.harmonySettings.style.name
+            self.harmonyLabel = "\(self.harmonySettings.style.name) C\(Int((self.harmonyComplexity * 100).rounded()))"
             self.visualizerBands.lastVelocity = (Double(velocity) / 127).clamped(to: 0...1)
             self.visualizerBands.amplitude = max(self.visualizerBands.amplitude, self.visualizerBands.lastVelocity)
             self.visualizerBands.bass = max(self.visualizerBands.bass, self.visualizerBands.lastVelocity * 0.55)
@@ -300,6 +370,7 @@ final class AudioManager: ObservableObject {
         if let startedNote {
             let duration = max(0.06, min(8, Date().timeIntervalSince(startedNote.startedAt)))
             scheduleLoopEchoes(for: startedNote, duration: duration)
+            recordPlayedEvent(note: note, startedNote: startedNote)
         }
 
         DispatchQueue.main.async {
@@ -419,16 +490,55 @@ final class AudioManager: ObservableObject {
         }
     }
 
-    private func scheduleLoopEchoes(for startedNote: StartedPerformanceNote, duration: TimeInterval) {
-        guard loopEnabled, loopBeats > 0, tempoBPM > 0 else { return }
+    private func applyHarmonyControls() {
+        harmonySettings.lockedKey = HarmonyEngine.KeySignature(rootPitchClass: keyRootIndex, mode: keyMode)
+        harmonySettings.maxVoices = Int((1 + harmonyComplexity * 3).rounded()).clamped(to: 1...4)
+        harmonySettings.spread = Int((harmonyComplexity * 4).rounded()).clamped(to: 0...4)
+        harmonySettings.velocityScale = 0.58 + harmonyComplexity * 0.24
+    }
+
+    private func scheduleGridHarmony(from voices: [PerformanceVoice], sourceVelocity: MIDIVelocity) {
+        let harmonyVoices = Array(voices.dropFirst())
+        guard !harmonyVoices.isEmpty, harmonyComplexity > 0.18 else { return }
 
         let generation = loopGeneration
-        let loopInterval = (60 / tempoBPM) * loopBeats
+        let step = gridStepDuration()
+        let steps = Int((1 + harmonyComplexity * 5).rounded()).clamped(to: 1...6)
+
+        for index in 0..<steps {
+            let voice = harmonyVoices[index % harmonyVoices.count]
+            let delay = step * Double(index + 1)
+            let gain = 0.38 + harmonyComplexity * 0.34
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.hasStarted, self.loopGeneration == generation else { return }
+                let velocity = MIDIVelocity((Double(sourceVelocity) * voice.velocityRatio * gain).rounded().clamped(to: 1...127))
+                if self.loopSamplers.indices.contains(voice.instrumentID) {
+                    self.loopSamplers[voice.instrumentID].play(noteNumber: voice.note, velocity: velocity, channel: voice.channel)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + min(step * 0.75, 0.35)) { [weak self] in
+                        guard let self, self.loopGeneration == generation, self.loopSamplers.indices.contains(voice.instrumentID) else { return }
+                        self.loopSamplers[voice.instrumentID].stop(noteNumber: voice.note, channel: voice.channel)
+                    }
+                }
+            }
+        }
+    }
+
+    private func gridStepDuration() -> TimeInterval {
+        let quarter = 60 / tempoBPM
+        let beat = quarter * (4 / Double(selectedTimeSignature.beatUnit))
+        return beat / (harmonyComplexity > 0.70 ? 2 : 1)
+    }
+
+    private func scheduleLoopEchoes(for startedNote: StartedPerformanceNote, duration: TimeInterval) {
+        guard loopEnabled, tempoBPM > 0 else { return }
+
+        let generation = loopGeneration
+        let loopInterval = (60 / tempoBPM) * selectedTimeSignature.measureBeatsInQuarterNotes
         let replayDuration = min(duration, loopInterval * 0.92)
 
         for repeatIndex in 1...5 {
             let delay = loopInterval * Double(repeatIndex)
-            let gain = pow(0.68, Double(repeatIndex))
+            let gain = pow(0.88, Double(repeatIndex))
 
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, self.hasStarted, self.loopGeneration == generation else { return }
@@ -445,7 +555,11 @@ final class AudioManager: ObservableObject {
     private func playLoopVoices(_ voices: [PerformanceVoice], sourceVelocity: MIDIVelocity, gain: Double) {
         for voice in voices where samplers.indices.contains(voice.layer) {
             let velocity = MIDIVelocity((Double(sourceVelocity) * voice.velocityRatio * gain).rounded().clamped(to: 1...127))
-            samplers[voice.layer].play(noteNumber: voice.note, velocity: velocity, channel: voice.channel)
+            if loopSamplers.indices.contains(voice.instrumentID) {
+                loopSamplers[voice.instrumentID].play(noteNumber: voice.note, velocity: velocity, channel: voice.channel)
+            } else {
+                samplers[voice.layer].play(noteNumber: voice.note, velocity: velocity, channel: voice.channel)
+            }
         }
 
         DispatchQueue.main.async {
@@ -458,7 +572,48 @@ final class AudioManager: ObservableObject {
 
     private func stopLoopVoices(_ voices: [PerformanceVoice]) {
         for voice in voices where samplers.indices.contains(voice.layer) {
-            samplers[voice.layer].stop(noteNumber: voice.note, channel: voice.channel)
+            if loopSamplers.indices.contains(voice.instrumentID) {
+                loopSamplers[voice.instrumentID].stop(noteNumber: voice.note, channel: voice.channel)
+            } else {
+                samplers[voice.layer].stop(noteNumber: voice.note, channel: voice.channel)
+            }
+        }
+    }
+
+    private func startDrumLoop() {
+        drumGeneration += 1
+        scheduleDrumBeat(step: 0, generation: drumGeneration)
+    }
+
+    private func scheduleDrumBeat(step: Int, generation: Int) {
+        guard hasStarted, generation == drumGeneration else { return }
+
+        if drumEnabled {
+            playDrumStep(step)
+        }
+
+        let beatDuration = (60 / tempoBPM) * (4 / Double(selectedTimeSignature.beatUnit))
+        DispatchQueue.main.asyncAfter(deadline: .now() + beatDuration) { [weak self] in
+            guard let self else { return }
+            let next = (step + 1) % max(1, self.selectedTimeSignature.beats)
+            self.scheduleDrumBeat(step: next, generation: generation)
+        }
+    }
+
+    private func playDrumStep(_ step: Int) {
+        let isDownbeat = step == 0
+        let isBackbeat = selectedTimeSignature.beats >= 4 ? step == 2 : step == 1
+        let notes: [(MIDINoteNumber, MIDIVelocity)] = [
+            (36, isDownbeat ? 96 : 58),
+            (42, 42),
+            (38, isBackbeat ? 78 : 0)
+        ].filter { $0.1 > 0 }
+
+        for note in notes {
+            drumSampler.play(noteNumber: note.0, velocity: note.1, channel: 9)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+                self?.drumSampler.stop(noteNumber: note.0, channel: 9)
+            }
         }
     }
 
@@ -471,6 +626,28 @@ final class AudioManager: ObservableObject {
             self.harmonyLabel = style.name
             self.lastMIDIEvent = "Harmony: \(style.name)"
         }
+    }
+
+    private func recordPlayedEvent(note: MIDINoteNumber, startedNote: StartedPerformanceNote) {
+        let event = PlayedEvent(
+            noteName: noteName(note),
+            instrumentName: startedNote.instrumentName,
+            harmonyName: startedNote.harmonyName,
+            rhythmName: startedNote.rhythmName
+        )
+
+        DispatchQueue.main.async {
+            self.playedEvents.insert(event, at: 0)
+            if self.playedEvents.count > 8 {
+                self.playedEvents.removeLast(self.playedEvents.count - 8)
+            }
+        }
+    }
+
+    private func noteName(_ note: MIDINoteNumber) -> String {
+        let names = HarmonyEngine.KeySignature.pitchNames
+        let octave = Int(note / 12) - 1
+        return "\(names[Int(note % 12)])\(octave)"
     }
 }
 

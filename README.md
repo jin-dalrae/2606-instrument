@@ -20,7 +20,10 @@ The app is designed for a Mac Mini or MacBook running fully on-device. No cloud 
 - FFT-driven SwiftUI `Canvas` particle visualizer with bass, mid, treble, note velocity, and knob modulation.
 - Visualizer-first performance screen with a compact HUD and rhythm controls.
 - Particle-only visualizer; graph-style meters are intentionally not drawn over the performance view.
-- Echo looper that repeats played notes and harmonies five times, fading quieter on each repeat.
+- Echo looper that repeats played notes and harmonies five times, fading gradually on each repeat.
+- Key, scale, time-signature, BPM, drum, and harmony-complexity controls.
+- Basic drum rhythm plus a selectable Drum Kit instrument.
+- Played-event log showing the note, instrument, harmony mode, and rhythm used for recent phrases.
 
 ## Requirements
 
@@ -74,10 +77,16 @@ Keyboard notes in the `36...51` range are treated as music, not instrument selec
 The bottom rhythm control sets the loop timing:
 
 - `Speed`: tempo in BPM.
-- `Rhythm`: repeat interval in beats.
+- `Time`: time signature, currently `4/4`, `3/4`, `6/8`, or `3/8`.
+- `Key`: root note such as C, C#, D, etc.
+- `Scale`: major, minor, or pentatonic.
+- `Complex`: harmony density and rhythmic movement.
 - Repeat switch: enables or disables the echo looper.
+- `Drums`: enables or disables the built-in beat.
 
 When you play and release a note, the app loops the melody plus its generated harmony voices five times. Each repeat is quieter than the previous one, so phrases fade away naturally instead of building forever.
+
+Looped phrases keep the instrument they were recorded with. If you play a piano phrase, switch to strings, and play another phrase, the older piano loop stays piano.
 
 ## Instruments
 

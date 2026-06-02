@@ -38,6 +38,8 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - One output `Mixer`.
 - Built-in macOS DLS bank used for starter sounds.
 - Runtime `.sf2` and `.dls` import into the current layer.
+- Separate loop playback samplers preserve the instrument sound used when a phrase was captured.
+- Dedicated drum sampler provides the built-in beat.
 
 ### MIDI Input
 
@@ -57,6 +59,8 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - Mirrors the selected instrument across layers by default so harmonies feel like one coherent played instrument.
 - Supports harmony styles: off, close thirds, open fifths, full triad, and dreamy.
 - Supports hardware-controlled voice count and spread.
+- Supports screen-controlled key, scale, time signature, and harmony complexity.
+- Can generate grid-aligned harmony motion from a single played note.
 
 ### Visualizer
 
@@ -72,6 +76,8 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - Full-window visualizer-first performance screen.
 - Compact HUD for audio/MIDI state, last MIDI event, current instrument, and detected harmony label.
 - Compact rhythm controls for loop tempo, loop interval, and loop enablement.
+- Key, scale, time-signature, drum, and harmony-complexity controls.
+- Recent played-event log showing note, instrument, harmony mode, and rhythm.
 - Particle-only visualizer without graph-style meters over the performance view.
 
 ## User Stories
@@ -117,8 +123,17 @@ The current implementation is an MVP starter app built with SwiftUI and AudioKit
 - The app must capture played melody plus generated harmony voices after note release.
 - The app must repeat captured notes five times.
 - Each repeat must be quieter than the previous repeat.
-- The app must expose tempo and loop interval controls on screen.
+- The app must fade repeats gradually enough that previous phrases remain audible while new instruments are selected.
+- The app must preserve the captured instrument timbre for scheduled repeats even after the live instrument changes.
+- The app must expose tempo and time-signature controls on screen.
 - Panic/all-notes-off must cancel future scheduled loop repeats.
+
+### Drums
+
+- The app must provide a basic built-in drum beat.
+- The app must expose a drum enable/disable control on screen.
+- Drum timing must follow BPM and selected time signature.
+- Drum Kit must also be available as one of the selectable pad instruments.
 
 ### Visualization
 

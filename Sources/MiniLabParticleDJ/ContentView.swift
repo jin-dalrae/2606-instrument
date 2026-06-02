@@ -33,6 +33,7 @@ struct ContentView: View {
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.58))
                     .lineLimit(1)
+                playedLog
             }
 
             Spacer()
@@ -42,7 +43,7 @@ struct ContentView: View {
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
-                Text(audio.harmonyLabel)
+                Text("\(audio.harmonyLabel)  \(audio.selectedTimeSignature.label)")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.72))
                 Text(audio.status)
@@ -72,17 +73,50 @@ struct ContentView: View {
                 }
 
                 Slider(value: $audio.tempoBPM, in: 56...168, step: 1)
-                    .frame(width: 220)
+                    .frame(width: 170)
                     .tint(.cyan)
             }
 
-            Picker("Rhythm", selection: $audio.loopBeats) {
-                Text("2 beat").tag(2.0)
-                Text("4 beat").tag(4.0)
-                Text("8 beat").tag(8.0)
+            Picker("Time", selection: $audio.selectedTimeSignature) {
+                ForEach(TimeSignatureOption.options) { option in
+                    Text(option.label).tag(option)
+                }
             }
             .pickerStyle(.segmented)
-            .frame(width: 250)
+            .frame(width: 230)
+
+            Picker("Key", selection: $audio.keyRootIndex) {
+                ForEach(Array(HarmonyEngine.KeySignature.pitchNames.enumerated()), id: \.offset) { index, name in
+                    Text(name).tag(index)
+                }
+            }
+            .frame(width: 78)
+
+            Picker("Scale", selection: $audio.keyMode) {
+                ForEach(HarmonyEngine.ScaleMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .frame(width: 112)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text("Complex")
+                        .font(.caption.monospaced().weight(.bold))
+                        .foregroundStyle(.white.opacity(0.62))
+                    Text("\(Int((audio.harmonyComplexity * 100).rounded()))")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                }
+
+                Slider(value: $audio.harmonyComplexity, in: 0...1, step: 0.05)
+                    .frame(width: 150)
+                    .tint(.pink)
+            }
+
+            Toggle(isOn: $audio.drumEnabled) {
+                Label("Drums", systemImage: "metronome")
+            }
+            .toggleStyle(.button)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -99,6 +133,18 @@ struct ContentView: View {
             return audio.layers[0]
         }
         return audio.layers[audio.currentLayer]
+    }
+
+    private var playedLog: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(audio.playedEvents.prefix(5)) { event in
+                Text("\(event.noteName)  \(event.instrumentName)  \(event.harmonyName)  \(event.rhythmName)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.48))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.top, 4)
     }
 
 }
