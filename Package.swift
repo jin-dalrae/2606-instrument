@@ -22,7 +22,11 @@ let package = Package(
             resources: [
                 .process("Resources")
             ]
+        ),
+        .testTarget(
+            name: "MiniLabParticleDJTests",
+            dependencies: ["MiniLabParticleDJ"]
         )
     ],
-    swiftLanguageModes: [.v5]
+    swiftLanguageModes: [.v6]
 )

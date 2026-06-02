@@ -1,4 +1,4 @@
-import AudioKit
+@preconcurrency import AudioKit
 import AVFoundation
 import Combine
 import CoreMIDI
@@ -10,6 +10,14 @@ struct LayerState: Identifiable {
     var preset: InstrumentPreset
     var isLoaded: Bool = false
     var activeNotes: Set<MIDINoteNumber> = []
+    var volume: Double = 1.0
+    var isMuted: Bool = false
+    var isSoloed: Bool = false
+    var octaveOffset: Int = 0
+    var delayFeedback: Double = 0.3
+    var delayTime: Double = 0.35
+    var delayDryWet: Double = 0.0
+    var reverbDryWet: Double = 0.0
 }
 
 struct VisualizerBands {
@@ -66,13 +74,22 @@ private struct CapturedPhraseNote {
     let voices: [PerformanceVoice]
 }
 
+@MainActor
 final class AudioManager: ObservableObject {
     let padBaseNote: MIDINoteNumber = 36
+    
+    var connectedDevices: [String] {
+        midi.inputNames
+    }
 
     @Published var currentLayer = 0
     @Published var layers: [LayerState]
+    @Published var importedSoundFonts: [ImportedSoundFont] = []
+    @Published var activeLearnSlot: LearnSlot? = nil
+    @Published var mappingConfig = MIDIMappingConfiguration.default
     @Published var visualizerBands = VisualizerBands()
     @Published var controls = PerformanceControls()
+    @Published var activeScene: VisualScene = .hyperdrive
     @Published var tempoBPM: Double = 96
     @Published var selectedTimeSignature = TimeSignatureOption.options[0]
     @Published var loopEnabled = true
@@ -90,16 +107,20 @@ final class AudioManager: ObservableObject {
     @Published var playedEvents: [PlayedEvent] = []
     @Published var phraseStatus = "Phrase empty"
     @Published var midiEvents: [MIDIEventLog] = []
+    @Published var scoreNotes: [ScoreNote] = []
 
     private let engine = AudioEngine()
     private let mixer = Mixer()
     private let midi = MIDI()
     private let harmony = HarmonyEngine()
     private var samplers: [AppleSampler] = []
+    private var delays: [Delay] = []
+    private var reverbs: [Reverb] = []
     private var loopSamplers: [AppleSampler] = []
     private let drumSampler = AppleSampler()
     private var fftTap: FFTTap?
     private var loadedCustomInstrumentURLs: [Int: URL] = [:]
+    private var loadedCustomInstrumentBookmarks: [Int: Data] = [:]
     private var voicesBySourceNote: [MIDINoteNumber: [PerformanceVoice]] = [:]
     private var startedNotes: [MIDINoteNumber: StartedPerformanceNote] = [:]
     private var activePadNotes: Set<MIDINoteNumber> = []
@@ -131,7 +152,18 @@ final class AudioManager: ObservableObject {
         for _ in 0..<4 {
             let sampler = AppleSampler()
             samplers.append(sampler)
-            mixer.addInput(sampler)
+            
+            let delay = Delay(sampler)
+            delay.time = 0.35
+            delay.feedback = 0.3
+            delay.dryWetMix = 0.0
+            delays.append(delay)
+            
+            let reverb = Reverb(delay)
+            reverb.dryWetMix = 0.0
+            reverbs.append(reverb)
+            
+            mixer.addInput(reverb)
         }
 
         for _ in InstrumentPreset.starterPresets {
@@ -143,6 +175,8 @@ final class AudioManager: ObservableObject {
         mixer.addInput(drumSampler)
         engine.output = mixer
         midi.addListener(self)
+        loadImportedSoundFonts()
+        loadMappingConfig()
     }
 
     func start() {
@@ -153,9 +187,15 @@ final class AudioManager: ObservableObject {
             measureAnchor = Date()
             midi.openInput()
             configureFFT()
-            loadStarterPresets()
             loadLoopPresets()
             loadDrums()
+            
+            if let autoURL = autoSaveURL, FileManager.default.fileExists(atPath: autoURL.path) {
+                autoRestoreSession()
+            } else {
+                loadStarterPresets()
+            }
+            
             startDrumLoop()
             publishStatus("Engine running. Listening to Core MIDI inputs.")
         } catch {
@@ -164,6 +204,7 @@ final class AudioManager: ObservableObject {
     }
 
     func stop() {
+        autoSaveSession()
         panic()
         drumGeneration += 1
         fftTap?.stop()
@@ -188,22 +229,106 @@ final class AudioManager: ObservableObject {
         voicesBySourceNote.removeAll()
         startedNotes.removeAll()
         recentMelodyNotes.removeAll()
-        DispatchQueue.main.async {
-            for layer in self.layers.indices {
-                self.layers[layer].activeNotes.removeAll()
-            }
-            self.phraseStatus = "Phrase empty"
-            self.lastMIDIEvent = "All notes off"
+        for layer in self.layers.indices {
+            self.layers[layer].activeNotes.removeAll()
         }
-    }
-
-    deinit {
-        stop()
+        for idx in scoreNotes.indices {
+            if scoreNotes[idx].endTime == nil {
+                scoreNotes[idx].endTime = Date()
+            }
+        }
+        self.phraseStatus = "Phrase empty"
+        self.lastMIDIEvent = "All notes off"
     }
 
     func selectLayer(_ layer: Int) {
         guard layers.indices.contains(layer) else { return }
         currentLayer = layer
+    }
+
+    func setLayerVolume(layer: Int, volume: Double) {
+        guard layers.indices.contains(layer) else { return }
+        layers[layer].volume = volume
+        updateSamplerVolumes()
+    }
+
+    func setLayerMuted(layer: Int, isMuted: Bool) {
+        guard layers.indices.contains(layer) else { return }
+        layers[layer].isMuted = isMuted
+        updateSamplerVolumes()
+    }
+
+    func setLayerSoloed(layer: Int, isSoloed: Bool) {
+        guard layers.indices.contains(layer) else { return }
+        layers[layer].isSoloed = isSoloed
+        updateSamplerVolumes()
+    }
+
+    func setLayerOctave(layer: Int, octaveOffset: Int) {
+        guard layers.indices.contains(layer) else { return }
+        layers[layer].octaveOffset = octaveOffset
+    }
+
+    func shouldSilenceLayer(_ layer: Int) -> Bool {
+        guard layers.indices.contains(layer) else { return false }
+        let hasSolo = layers.contains(where: \.isSoloed)
+        if hasSolo {
+            return !layers[layer].isSoloed
+        } else {
+            return layers[layer].isMuted
+        }
+    }
+
+    func updateSamplerVolumes() {
+        let hasSolo = layers.contains(where: \.isSoloed)
+        for i in 0..<samplers.count {
+            guard layers.indices.contains(i) else { continue }
+            let isMuted = layers[i].isMuted
+            let isSoloed = layers[i].isSoloed
+            let targetVolume: Double
+            if hasSolo {
+                targetVolume = isSoloed ? layers[i].volume : 0.0
+            } else {
+                targetVolume = isMuted ? 0.0 : layers[i].volume
+            }
+            samplers[i].volume = AUValue(targetVolume)
+        }
+    }
+
+    func updateFXSettings(for layer: Int) {
+        guard layers.indices.contains(layer),
+              delays.indices.contains(layer),
+              reverbs.indices.contains(layer) else { return }
+        
+        let state = layers[layer]
+        delays[layer].feedback = AUValue(state.delayFeedback)
+        delays[layer].time = AUValue(state.delayTime)
+        delays[layer].dryWetMix = AUValue(state.delayDryWet * 100)
+        reverbs[layer].dryWetMix = AUValue(state.reverbDryWet * 100)
+    }
+
+    func setLayerDelayFeedback(layer: Int, feedback: Double) {
+        guard layers.indices.contains(layer) else { return }
+        layers[layer].delayFeedback = feedback
+        updateFXSettings(for: layer)
+    }
+    
+    func setLayerDelayTime(layer: Int, time: Double) {
+        guard layers.indices.contains(layer) else { return }
+        layers[layer].delayTime = time
+        updateFXSettings(for: layer)
+    }
+    
+    func setLayerDelayDryWet(layer: Int, dryWet: Double) {
+        guard layers.indices.contains(layer) else { return }
+        layers[layer].delayDryWet = dryWet
+        updateFXSettings(for: layer)
+    }
+    
+    func setLayerReverbDryWet(layer: Int, dryWet: Double) {
+        guard layers.indices.contains(layer) else { return }
+        layers[layer].reverbDryWet = dryWet
+        updateFXSettings(for: layer)
     }
 
     func loadCustomInstrument(url: URL, into layer: Int) {
@@ -219,13 +344,51 @@ final class AudioManager: ObservableObject {
         do {
             try samplers[layer].loadInstrument(url: url)
             loadedCustomInstrumentURLs[layer] = url
-            DispatchQueue.main.async {
-                self.layers[layer].name = url.deletingPathExtension().lastPathComponent
-                self.layers[layer].isLoaded = true
-                self.publishStatus("Loaded \(url.lastPathComponent) into layer \(layer + 1).")
+            
+            // Create security scoped bookmark
+            var bookmarkData: Data? = nil
+            do {
+                bookmarkData = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+            } catch {
+                print("Failed to create bookmark: \(error)")
             }
+            if let bookmarkData {
+                loadedCustomInstrumentBookmarks[layer] = bookmarkData
+                addImportedSoundFont(url: url, bookmarkData: bookmarkData)
+            } else {
+                loadedCustomInstrumentBookmarks.removeValue(forKey: layer)
+            }
+            
+            self.layers[layer].name = url.deletingPathExtension().lastPathComponent
+            self.layers[layer].isLoaded = true
+            self.publishStatus("Loaded \(url.lastPathComponent) into layer \(layer + 1).")
         } catch {
             publishStatus("Could not load \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+    }
+
+    func loadCustomInstrument(bookmarkData: Data, into layer: Int, filename: String) {
+        guard samplers.indices.contains(layer) else { return }
+        do {
+            var isStale = false
+            let url = try URL(resolvingBookmarkData: bookmarkData, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale)
+            
+            let didStartAccess = url.startAccessingSecurityScopedResource()
+            defer {
+                if didStartAccess {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+            
+            try samplers[layer].loadInstrument(url: url)
+            loadedCustomInstrumentURLs[layer] = url
+            loadedCustomInstrumentBookmarks[layer] = bookmarkData
+            
+            self.layers[layer].name = filename
+            self.layers[layer].isLoaded = true
+            self.publishStatus("Loaded \(filename) into layer \(layer + 1).")
+        } catch {
+            publishStatus("Could not resolve bookmark for layer \(layer + 1): \(error.localizedDescription)")
         }
     }
 
@@ -240,15 +403,197 @@ final class AudioManager: ObservableObject {
                 bankLSB: preset.bankLSB
             )
 
-            DispatchQueue.main.async {
-                self.loadedCustomInstrumentURLs[layer] = nil
-                self.layers[layer].preset = preset
-                self.layers[layer].name = preset.name
-                self.layers[layer].isLoaded = true
-                self.publishStatus("Layer \(layer + 1): \(preset.name)")
-            }
+            self.loadedCustomInstrumentURLs[layer] = nil
+            self.layers[layer].preset = preset
+            self.layers[layer].name = preset.name
+            self.layers[layer].isLoaded = true
+            self.publishStatus("Layer \(layer + 1): \(preset.name)")
         } catch {
             publishStatus("Could not load \(preset.name): \(error.localizedDescription)")
+        }
+    }
+
+    func getSessionState() -> SessionState {
+        let tsIndex = TimeSignatureOption.options.firstIndex(of: selectedTimeSignature) ?? 0
+        let pLayers = layers.map { layer in
+            let customBookmark = loadedCustomInstrumentBookmarks[layer.id]
+            let customFilename = loadedCustomInstrumentURLs[layer.id]?.lastPathComponent
+            let presetID = customBookmark == nil ? layer.preset.id : nil
+            return PersistableLayerState(
+                id: layer.id,
+                name: layer.name,
+                presetID: presetID,
+                customInstrumentBookmarkData: customBookmark,
+                customInstrumentFilename: customFilename,
+                volume: layer.volume,
+                isMuted: layer.isMuted,
+                isSoloed: layer.isSoloed,
+                octaveOffset: layer.octaveOffset,
+                delayFeedback: layer.delayFeedback,
+                delayTime: layer.delayTime,
+                delayDryWet: layer.delayDryWet,
+                reverbDryWet: layer.reverbDryWet
+            )
+        }
+        return SessionState(
+            tempoBPM: tempoBPM,
+            selectedTimeSignatureIndex: tsIndex,
+            loopEnabled: loopEnabled,
+            drumEnabled: drumEnabled,
+            harmonyComplexity: harmonyComplexity,
+            keyRootIndex: keyRootIndex,
+            keyModeRawValue: keyMode.rawValue,
+            padChannelNumber: padChannelNumber,
+            currentLayer: currentLayer,
+            activeScene: activeScene,
+            layers: pLayers
+        )
+    }
+
+    func applySessionState(_ state: SessionState) {
+        self.tempoBPM = state.tempoBPM
+        if TimeSignatureOption.options.indices.contains(state.selectedTimeSignatureIndex) {
+            self.selectedTimeSignature = TimeSignatureOption.options[state.selectedTimeSignatureIndex]
+        }
+        self.loopEnabled = state.loopEnabled
+        self.drumEnabled = state.drumEnabled
+        self.harmonyComplexity = state.harmonyComplexity
+        self.keyRootIndex = state.keyRootIndex
+        if let mode = HarmonyEngine.ScaleMode(rawValue: state.keyModeRawValue) {
+            self.keyMode = mode
+        }
+        self.padChannelNumber = state.padChannelNumber
+        self.currentLayer = state.currentLayer
+        self.activeScene = state.activeScene ?? .hyperdrive
+        
+        for pLayer in state.layers {
+            let layerId = pLayer.id
+            guard self.layers.indices.contains(layerId) else { continue }
+            self.layers[layerId].volume = pLayer.volume
+            self.layers[layerId].isMuted = pLayer.isMuted
+            self.layers[layerId].isSoloed = pLayer.isSoloed
+            self.layers[layerId].octaveOffset = pLayer.octaveOffset
+            self.layers[layerId].delayFeedback = pLayer.delayFeedback ?? 0.3
+            self.layers[layerId].delayTime = pLayer.delayTime ?? 0.35
+            self.layers[layerId].delayDryWet = pLayer.delayDryWet ?? 0.0
+            self.layers[layerId].reverbDryWet = pLayer.reverbDryWet ?? 0.0
+            
+            if let bookmarkData = pLayer.customInstrumentBookmarkData,
+               let filename = pLayer.customInstrumentFilename {
+                self.loadCustomInstrument(bookmarkData: bookmarkData, into: layerId, filename: filename)
+            } else if let presetId = pLayer.presetID,
+                      let preset = InstrumentPreset.starterPresets.first(where: { $0.id == presetId }) {
+                self.loadPreset(preset, into: layerId)
+            }
+            
+            self.updateFXSettings(for: layerId)
+        }
+        
+        self.updateSamplerVolumes()
+        self.publishStatus("Session loaded successfully.")
+    }
+
+    func saveSession(to url: URL) {
+        let didStartAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        do {
+            let state = getSessionState()
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .prettyPrinted
+            let data = try encoder.encode(state)
+            try data.write(to: url)
+            publishStatus("Session saved to \(url.lastPathComponent)")
+        } catch {
+            publishStatus("Failed to save session: \(error.localizedDescription)")
+        }
+    }
+
+    func loadSession(from url: URL) {
+        let didStartAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            let state = try decoder.decode(SessionState.self, from: data)
+            applySessionState(state)
+        } catch {
+            publishStatus("Failed to load session: \(error.localizedDescription)")
+        }
+    }
+
+    private var autoSaveURL: URL? {
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let dir = appSupport.appendingPathComponent("MiniLabParticleDJ", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
+        return dir.appendingPathComponent("last_session.json")
+    }
+
+    func autoSaveSession() {
+        guard let url = autoSaveURL else { return }
+        do {
+            let state = getSessionState()
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(state)
+            try data.write(to: url)
+        } catch {
+            print("Auto-save failed: \(error)")
+        }
+    }
+
+    func autoRestoreSession() {
+        guard let url = autoSaveURL, FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            let state = try decoder.decode(SessionState.self, from: data)
+            applySessionState(state)
+            publishStatus("Last session automatically restored.")
+        } catch {
+            print("Auto-restore failed: \(error)")
+        }
+    }
+
+    func addImportedSoundFont(url: URL, bookmarkData: Data) {
+        let name = url.deletingPathExtension().lastPathComponent
+        if !importedSoundFonts.contains(where: { $0.name == name }) {
+            self.importedSoundFonts.append(ImportedSoundFont(name: name, bookmarkData: bookmarkData))
+            self.saveImportedSoundFonts()
+        }
+    }
+
+    private func saveImportedSoundFonts() {
+        if let data = try? JSONEncoder().encode(importedSoundFonts) {
+            UserDefaults.standard.set(data, forKey: "imported_soundfonts")
+        }
+    }
+
+    private func loadImportedSoundFonts() {
+        if let data = UserDefaults.standard.data(forKey: "imported_soundfonts"),
+           let list = try? JSONDecoder().decode([ImportedSoundFont].self, from: data) {
+            self.importedSoundFonts = list
+        }
+    }
+
+    func saveMappingConfig() {
+        if let data = try? JSONEncoder().encode(mappingConfig) {
+            UserDefaults.standard.set(data, forKey: "midi_mapping_config")
+        }
+    }
+
+    func loadMappingConfig() {
+        if let data = UserDefaults.standard.data(forKey: "midi_mapping_config"),
+           let config = try? JSONDecoder().decode(MIDIMappingConfiguration.self, from: data) {
+            self.mappingConfig = config
         }
     }
 
@@ -326,7 +671,7 @@ final class AudioManager: ObservableObject {
         }
     }
 
-    private func noteOn(_ note: MIDINoteNumber, velocity: MIDIVelocity, channel: MIDIChannel) {
+    func noteOn(_ note: MIDINoteNumber, velocity: MIDIVelocity, channel: MIDIChannel) {
         guard samplers.indices.contains(currentLayer) else { return }
 
         applyHarmonyControls()
@@ -339,8 +684,18 @@ final class AudioManager: ObservableObject {
             recentNotes: recentMelodyNotes,
             settings: harmonySettings
         )
-        let melodyNote = harmony.correctedMelodyNote(note, settings: harmonySettings, snapshot: result.snapshot)
-        samplers[currentLayer].play(noteNumber: melodyNote, velocity: velocity, channel: channel)
+        let correctedMelody = harmony.correctedMelodyNote(note, settings: harmonySettings, snapshot: result.snapshot)
+        let melodyOctaveOffset = layers[currentLayer].octaveOffset * 12
+        let melodyNote = clampedMIDINote(Int(correctedMelody) + melodyOctaveOffset) ?? correctedMelody
+        if !shouldSilenceLayer(currentLayer) {
+            samplers[currentLayer].play(noteNumber: melodyNote, velocity: velocity, channel: channel)
+        }
+        
+        let mainScoreNote = ScoreNote(pitch: UInt8(melodyNote), startTime: Date(), endTime: nil, layer: currentLayer)
+        scoreNotes.append(mainScoreNote)
+        if scoreNotes.count > 120 {
+            scoreNotes.removeFirst(scoreNotes.count - 120)
+        }
 
         let harmonyVelocity = MIDIVelocity((Double(velocity) * harmonySettings.velocityScale).rounded().clamped(to: 1...127))
         var voices: [PerformanceVoice] = [
@@ -349,8 +704,42 @@ final class AudioManager: ObservableObject {
 
         for (offset, harmonyNote) in result.notes.enumerated() {
             let layer = (currentLayer + offset + 1) % samplers.count
-            samplers[layer].play(noteNumber: harmonyNote, velocity: harmonyVelocity, channel: channel)
-            voices.append(PerformanceVoice(layer: layer, instrumentID: currentPreset.id, note: harmonyNote, channel: channel, velocityRatio: harmonySettings.velocityScale))
+            let harmonyOctaveOffset = layers[layer].octaveOffset * 12
+            let shiftedHarmonyNote = clampedMIDINote(Int(harmonyNote) + harmonyOctaveOffset) ?? harmonyNote
+            
+            // Calculate sequential melody step delay based on tempo and complexity
+            let beatDuration = 60.0 / tempoBPM
+            let stepDelay: Double
+            if harmonyComplexity < 0.35 {
+                stepDelay = 0.5 * beatDuration   // 8th note delay (melodic cascade)
+            } else if harmonyComplexity < 0.7 {
+                stepDelay = 0.25 * beatDuration  // 16th note delay (faster cascade)
+            } else {
+                stepDelay = 0.125 * beatDuration // 32nd note delay (very fast cascade)
+            }
+            let noteDelay = Double(offset + 1) * stepDelay
+            
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(noteDelay * 1_000_000_000))
+                guard self.startedNotes[note] != nil else { return }
+                
+                let maxVelocityOffset = 2 + Int(self.harmonyComplexity * 10)
+                let velocityOffset = Int.random(in: -maxVelocityOffset...maxVelocityOffset)
+                let humanizedVelocity = MIDIVelocity((Double(harmonyVelocity) + Double(velocityOffset)).rounded().clamped(to: 1...127))
+                
+                if !self.shouldSilenceLayer(layer) {
+                    self.samplers[layer].play(noteNumber: shiftedHarmonyNote, velocity: humanizedVelocity, channel: channel)
+                }
+                
+                // Add the score note ONLY when the audio actually triggers
+                let harmonyScoreNote = ScoreNote(pitch: UInt8(shiftedHarmonyNote), startTime: Date(), endTime: nil, layer: layer)
+                self.scoreNotes.append(harmonyScoreNote)
+                if self.scoreNotes.count > 120 {
+                    self.scoreNotes.removeFirst(self.scoreNotes.count - 120)
+                }
+            }
+            
+            voices.append(PerformanceVoice(layer: layer, instrumentID: currentPreset.id, note: shiftedHarmonyNote, channel: channel, velocityRatio: harmonySettings.velocityScale))
         }
 
         voicesBySourceNote[note] = voices
@@ -365,27 +754,34 @@ final class AudioManager: ObservableObject {
         )
         scheduleGridHarmony(from: voices, sourceVelocity: velocity)
 
-        DispatchQueue.main.async {
-            self.layers[self.currentLayer].activeNotes.insert(note)
-            self.scaleLabel = result.snapshot.keyLabel
-            self.chordLabel = result.snapshot.chordLabel
-            self.harmonyLabel = "\(self.harmonySettings.style.name) C\(Int((self.harmonyComplexity * 100).rounded()))"
-            self.visualizerBands.lastVelocity = (Double(velocity) / 127).clamped(to: 0...1)
-            self.visualizerBands.amplitude = max(self.visualizerBands.amplitude, self.visualizerBands.lastVelocity)
-            self.visualizerBands.bass = max(self.visualizerBands.bass, self.visualizerBands.lastVelocity * 0.55)
-            self.visualizerBands.mid = max(self.visualizerBands.mid, self.visualizerBands.lastVelocity * 0.75)
-            self.visualizerBands.treble = max(self.visualizerBands.treble, self.visualizerBands.lastVelocity * 0.45)
-            self.visualizerBands.triggerID += 1
-            self.lastMIDIEvent = "Note \(note) velocity \(velocity)"
-        }
+        self.layers[self.currentLayer].activeNotes.insert(note)
+        self.scaleLabel = result.snapshot.keyLabel
+        self.chordLabel = result.snapshot.chordLabel
+        self.harmonyLabel = "\(self.harmonySettings.style.name) C\(Int((self.harmonyComplexity * 100).rounded()))"
+        self.visualizerBands.lastVelocity = (Double(velocity) / 127).clamped(to: 0...1)
+        self.visualizerBands.amplitude = max(self.visualizerBands.amplitude, self.visualizerBands.lastVelocity)
+        self.visualizerBands.bass = max(self.visualizerBands.bass, self.visualizerBands.lastVelocity * 0.55)
+        self.visualizerBands.mid = max(self.visualizerBands.mid, self.visualizerBands.lastVelocity * 0.75)
+        self.visualizerBands.treble = max(self.visualizerBands.treble, self.visualizerBands.lastVelocity * 0.45)
+        self.visualizerBands.triggerID += 1
+        self.lastMIDIEvent = "Note \(note) velocity \(velocity)"
     }
 
-    private func noteOff(_ note: MIDINoteNumber, channel: MIDIChannel) {
+    func noteOff(_ note: MIDINoteNumber, channel: MIDIChannel) {
         let startedNote = startedNotes.removeValue(forKey: note)
+
+        let melodyOctaveOffset = layers[currentLayer].octaveOffset * 12
+        let melodyNote = clampedMIDINote(Int(note) + melodyOctaveOffset) ?? note
+        if let idx = scoreNotes.lastIndex(where: { ($0.pitch == note || $0.pitch == melodyNote) && $0.endTime == nil }) {
+            scoreNotes[idx].endTime = Date()
+        }
 
         if let voices = voicesBySourceNote.removeValue(forKey: note) {
             for voice in voices where samplers.indices.contains(voice.layer) {
                 samplers[voice.layer].stop(noteNumber: voice.note, channel: voice.channel)
+                if let idx = scoreNotes.lastIndex(where: { $0.pitch == voice.note && $0.endTime == nil }) {
+                    scoreNotes[idx].endTime = Date()
+                }
             }
         } else if samplers.indices.contains(currentLayer) {
             samplers[currentLayer].stop(noteNumber: note, channel: channel)
@@ -401,56 +797,64 @@ final class AudioManager: ObservableObject {
             recordPlayedEvent(note: note, startedNote: startedNote)
         }
 
-        DispatchQueue.main.async {
-            for layer in self.layers.indices {
-                self.layers[layer].activeNotes.remove(note)
-            }
-            self.lastMIDIEvent = "Note off \(note)"
+        for layer in self.layers.indices {
+            self.layers[layer].activeNotes.remove(note)
         }
+        self.lastMIDIEvent = "Note off \(note)"
     }
 
     private func handlePadNoteOn(note: MIDINoteNumber) -> Bool {
-        guard note >= padBaseNote else { return false }
-        let padIndex = Int(note - padBaseNote)
+        guard let padIndex = mappingConfig.padMappings[Int(note)] else { return false }
         guard InstrumentPreset.starterPresets.indices.contains(padIndex) else { return false }
 
         activePadNotes.insert(note)
-        if activePadNotes.contains(padBaseNote), activePadNotes.contains(padBaseNote + 15) {
+        
+        let pad0Note = mappingConfig.padMappings.first(where: { $0.value == 0 })?.key
+        let pad15Note = mappingConfig.padMappings.first(where: { $0.value == 15 })?.key
+        if let pad0Note, let pad15Note, activePadNotes.contains(MIDINoteNumber(pad0Note)), activePadNotes.contains(MIDINoteNumber(pad15Note)) {
             panic()
-            DispatchQueue.main.async {
-                self.lastPadIndex = nil
-                self.lastMIDIEvent = "Pad 1 + 16: all notes off"
-            }
+            self.lastPadIndex = nil
+            self.lastMIDIEvent = "Pad 1 + 16: all notes off"
             return true
         }
 
         if padIndex == 12 {
-            DispatchQueue.main.async {
-                self.lastPadIndex = padIndex
-                self.lastMIDIEvent = "Layer select"
-            }
+            self.lastPadIndex = padIndex
+            self.lastMIDIEvent = "Layer select"
             return true
         }
 
         if padIndex == 13 {
-            DispatchQueue.main.async {
-                self.lastPadIndex = padIndex
-                self.lastMIDIEvent = "Harmony select"
-            }
+            self.lastPadIndex = padIndex
+            self.lastMIDIEvent = "Harmony select"
             return true
         }
 
-        if activePadNotes.contains(padBaseNote + 12) {
+        let pad12Note = mappingConfig.padMappings.first(where: { $0.value == 12 })?.key
+        if let pad12Note, activePadNotes.contains(MIDINoteNumber(pad12Note)) {
+            if padIndex == 14 {
+                loopEnabled.toggle()
+                self.lastPadIndex = padIndex
+                self.lastMIDIEvent = "Loop: \(loopEnabled ? "ON" : "OFF")"
+                publishStatus("Loop Playback \(loopEnabled ? "Enabled" : "Disabled")")
+                return true
+            }
+            if padIndex == 15 {
+                drumEnabled.toggle()
+                self.lastPadIndex = padIndex
+                self.lastMIDIEvent = "Drums: \(drumEnabled ? "ON" : "OFF")"
+                publishStatus("Drumbeat \(drumEnabled ? "Enabled" : "Disabled")")
+                return true
+            }
             guard padIndex < samplers.count else { return true }
             selectLayer(padIndex)
-            DispatchQueue.main.async {
-                self.lastPadIndex = padIndex
-                self.lastMIDIEvent = "Layer \(self.currentLayer + 1)"
-            }
+            self.lastPadIndex = padIndex
+            self.lastMIDIEvent = "Layer \(self.currentLayer + 1)"
             return true
         }
 
-        if activePadNotes.contains(padBaseNote + 13) {
+        let pad13Note = mappingConfig.padMappings.first(where: { $0.value == 13 })?.key
+        if let pad13Note, activePadNotes.contains(MIDINoteNumber(pad13Note)) {
             guard padIndex < HarmonyStyle.allCases.count else { return true }
             selectHarmonyStyle(padIndex)
             return true
@@ -458,25 +862,20 @@ final class AudioManager: ObservableObject {
 
         let preset = InstrumentPreset.starterPresets[padIndex]
         loadPerformancePreset(preset)
-        DispatchQueue.main.async {
-            self.lastPadIndex = padIndex
-            self.lastMIDIEvent = "Instrument: \(preset.name)"
-        }
+        self.lastPadIndex = padIndex
+        self.lastMIDIEvent = "Instrument: \(preset.name)"
         return true
     }
 
     private func learnPadsFrom(note: MIDINoteNumber, channel: MIDIChannel) {
         guard !isLikelyKeyboardChannel(channel) else { return }
-        if note >= padBaseNote, note < padBaseNote + MIDINoteNumber(InstrumentPreset.starterPresets.count) {
+        if mappingConfig.padMappings[Int(note)] != nil {
             padChannelNumber = Int(channel) + 1
         }
     }
 
     private func handlePadNoteOff(note: MIDINoteNumber) -> Bool {
-        guard note >= padBaseNote else { return false }
-        let padIndex = Int(note - padBaseNote)
-        guard InstrumentPreset.starterPresets.indices.contains(padIndex) else { return false }
-
+        guard mappingConfig.padMappings[Int(note)] != nil else { return false }
         activePadNotes.remove(note)
         return true
     }
@@ -484,34 +883,30 @@ final class AudioManager: ObservableObject {
     private func handleControl(_ controller: MIDIByte, value: MIDIByte) {
         let normalized = Double(value) / 127
 
-        DispatchQueue.main.async {
-            switch controller {
-            case 120, 123:
-                self.panic()
-            case 74:
+        if controller == 120 || controller == 123 {
+            self.panic()
+        } else if let target = self.mappingConfig.ccMappings[Int(controller)] {
+            switch target {
+            case .brightness:
                 self.controls.brightness = normalized
-            case 71:
+            case .gravity:
                 self.controls.gravity = normalized
-            case 73:
+            case .particleSize:
                 self.controls.particleSize = normalized
                 self.harmonySettings.spread = Int((normalized * 4).rounded()).clamped(to: 0...4)
                 self.harmonyLabel = "\(self.harmonySettings.style.name) S\(self.harmonySettings.spread)"
-            case 72:
+            case .trail:
                 self.controls.trail = normalized
                 self.harmonySettings.maxVoices = Int((normalized * 4).rounded()).clamped(to: 1...4)
                 self.harmonyLabel = "\(self.harmonySettings.style.name) V\(self.harmonySettings.maxVoices)"
-            default:
-                break
             }
-
-            self.lastMIDIEvent = "CC \(controller): \(value)"
         }
+
+        self.lastMIDIEvent = "CC \(controller): \(value)"
     }
 
     private func publishStatus(_ message: String) {
-        DispatchQueue.main.async {
-            self.status = message
-        }
+        self.status = message
     }
 
     private func smooth(_ current: Double, toward next: Double) -> Double {
@@ -544,13 +939,17 @@ final class AudioManager: ObservableObject {
             let voice = harmonyVoices[index % harmonyVoices.count]
             let delay = step * Double(index + 1)
             let gain = 0.38 + harmonyComplexity * 0.34
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.hasStarted, self.loopGeneration == generation else { return }
-                let velocity = MIDIVelocity((Double(sourceVelocity) * voice.velocityRatio * gain).rounded().clamped(to: 1...127))
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard self.hasStarted, self.loopGeneration == generation else { return }
+                guard !self.shouldSilenceLayer(voice.layer) else { return }
+                let layerVolume = self.layers[voice.layer].volume
+                let velocity = MIDIVelocity((Double(sourceVelocity) * voice.velocityRatio * gain * layerVolume).rounded().clamped(to: 1...127))
                 if self.loopSamplers.indices.contains(voice.instrumentID) {
                     self.loopSamplers[voice.instrumentID].play(noteNumber: voice.note, velocity: velocity, channel: voice.channel)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + min(step * 0.75, 0.35)) { [weak self] in
-                        guard let self, self.loopGeneration == generation, self.loopSamplers.indices.contains(voice.instrumentID) else { return }
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: UInt64(min(step * 0.75, 0.35) * 1_000_000_000))
+                        guard self.loopGeneration == generation, self.loopSamplers.indices.contains(voice.instrumentID) else { return }
                         self.loopSamplers[voice.instrumentID].stop(noteNumber: voice.note, channel: voice.channel)
                     }
                 }
@@ -582,18 +981,18 @@ final class AudioManager: ObservableObject {
             )
         )
 
-        DispatchQueue.main.async {
-            self.phraseStatus = "Phrase \(self.phraseNotes.count) note\(self.phraseNotes.count == 1 ? "" : "s")"
-        }
+        self.phraseStatus = "Phrase \(self.phraseNotes.count) note\(self.phraseNotes.count == 1 ? "" : "s")"
         scheduleCurrentPhraseIfNeeded()
     }
 
     private func scheduleCurrentPhraseIfNeeded() {
         phraseScheduleGeneration += 1
         let generation = phraseScheduleGeneration
+        let delay = delayToNextMeasure(from: Date())
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + delayToNextMeasure(from: Date())) { [weak self] in
-            guard let self, self.hasStarted, self.loopEnabled, self.phraseScheduleGeneration == generation else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard self.hasStarted, self.loopEnabled, self.phraseScheduleGeneration == generation else { return }
             self.schedulePhraseRepeats(notes: self.phraseNotes, generation: self.loopGeneration)
         }
     }
@@ -603,9 +1002,7 @@ final class AudioManager: ObservableObject {
 
         let loopInterval = measureDuration()
         phraseNotes.removeAll()
-        DispatchQueue.main.async {
-            self.phraseStatus = "Looping phrase"
-        }
+        self.phraseStatus = "Looping phrase"
 
         for repeatIndex in 1...5 {
             let gain = pow(0.88, Double(repeatIndex))
@@ -613,12 +1010,14 @@ final class AudioManager: ObservableObject {
                 let delay = note.startOffset + loopInterval * Double(repeatIndex - 1)
                 let replayDuration = min(note.duration, loopInterval * 0.92)
 
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    guard let self, self.hasStarted, self.loopGeneration == generation else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    guard self.hasStarted, self.loopGeneration == generation else { return }
                     self.playLoopVoices(note.voices, sourceVelocity: note.sourceVelocity, gain: gain)
 
-                    DispatchQueue.main.asyncAfter(deadline: .now() + replayDuration) { [weak self] in
-                        guard let self, self.loopGeneration == generation else { return }
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: UInt64(replayDuration * 1_000_000_000))
+                        guard self.loopGeneration == generation else { return }
                         self.stopLoopVoices(note.voices)
                     }
                 }
@@ -628,7 +1027,9 @@ final class AudioManager: ObservableObject {
 
     private func playLoopVoices(_ voices: [PerformanceVoice], sourceVelocity: MIDIVelocity, gain: Double) {
         for voice in voices where samplers.indices.contains(voice.layer) {
-            let velocity = MIDIVelocity((Double(sourceVelocity) * voice.velocityRatio * gain).rounded().clamped(to: 1...127))
+            guard !shouldSilenceLayer(voice.layer) else { continue }
+            let layerVolume = layers[voice.layer].volume
+            let velocity = MIDIVelocity((Double(sourceVelocity) * voice.velocityRatio * gain * layerVolume).rounded().clamped(to: 1...127))
             if loopSamplers.indices.contains(voice.instrumentID) {
                 loopSamplers[voice.instrumentID].play(noteNumber: voice.note, velocity: velocity, channel: voice.channel)
             } else {
@@ -636,12 +1037,10 @@ final class AudioManager: ObservableObject {
             }
         }
 
-        DispatchQueue.main.async {
-            self.visualizerBands.lastVelocity = max(self.visualizerBands.lastVelocity, gain)
-            self.visualizerBands.amplitude = max(self.visualizerBands.amplitude, gain * 0.7)
-            self.visualizerBands.triggerID += 1
-            self.lastMIDIEvent = "Loop x\(String(format: "%.2f", gain))"
-        }
+        self.visualizerBands.lastVelocity = max(self.visualizerBands.lastVelocity, gain)
+        self.visualizerBands.amplitude = max(self.visualizerBands.amplitude, gain * 0.7)
+        self.visualizerBands.triggerID += 1
+        self.lastMIDIEvent = "Loop x\(String(format: "%.2f", gain))"
     }
 
     private func stopLoopVoices(_ voices: [PerformanceVoice]) {
@@ -668,8 +1067,9 @@ final class AudioManager: ObservableObject {
         }
 
         let beatDuration = (60 / tempoBPM) * (4 / Double(selectedTimeSignature.beatUnit))
-        DispatchQueue.main.asyncAfter(deadline: .now() + beatDuration) { [weak self] in
-            guard let self else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(beatDuration * 1_000_000_000))
+            guard hasStarted, generation == drumGeneration else { return }
             let next = (step + 1) % max(1, self.selectedTimeSignature.beats)
             self.scheduleDrumBeat(step: next, generation: generation)
         }
@@ -680,8 +1080,9 @@ final class AudioManager: ObservableObject {
 
         for note in notes {
             drumSampler.play(noteNumber: note.0, velocity: note.1, channel: 9)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-                self?.drumSampler.stop(noteNumber: note.0, channel: 9)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 80_000_000) // 0.08s
+                self.drumSampler.stop(noteNumber: note.0, channel: 9)
             }
         }
     }
@@ -755,11 +1156,9 @@ final class AudioManager: ObservableObject {
         let styles = HarmonyStyle.allCases
         let style = styles[padIndex % styles.count]
         harmonySettings.style = style
-        DispatchQueue.main.async {
-            self.lastPadIndex = padIndex
-            self.harmonyLabel = style.name
-            self.lastMIDIEvent = "Harmony: \(style.name)"
-        }
+        self.lastPadIndex = padIndex
+        self.harmonyLabel = style.name
+        self.lastMIDIEvent = "Harmony: \(style.name)"
     }
 
     private func recordPlayedEvent(note: MIDINoteNumber, startedNote: StartedPerformanceNote) {
@@ -770,11 +1169,9 @@ final class AudioManager: ObservableObject {
             rhythmName: startedNote.rhythmName
         )
 
-        DispatchQueue.main.async {
-            self.playedEvents.insert(event, at: 0)
-            if self.playedEvents.count > 8 {
-                self.playedEvents.removeLast(self.playedEvents.count - 8)
-            }
+        self.playedEvents.insert(event, at: 0)
+        if self.playedEvents.count > 8 {
+            self.playedEvents.removeLast(self.playedEvents.count - 8)
         }
     }
 
@@ -785,31 +1182,54 @@ final class AudioManager: ObservableObject {
     }
 
     private func logMIDI(_ label: String) {
-        DispatchQueue.main.async {
-            self.midiEvents.insert(MIDIEventLog(label: label), at: 0)
-            if self.midiEvents.count > 6 {
-                self.midiEvents.removeLast(self.midiEvents.count - 6)
-            }
+        self.midiEvents.insert(MIDIEventLog(label: label), at: 0)
+        if self.midiEvents.count > 6 {
+            self.midiEvents.removeLast(self.midiEvents.count - 6)
         }
     }
 
     private func isLikelyKeyboardChannel(_ channel: MIDIChannel) -> Bool {
         channel == 0
     }
+
+    private func clampedMIDINote(_ value: Int) -> MIDINoteNumber? {
+        guard (0...127).contains(value) else { return nil }
+        return MIDINoteNumber(value)
+    }
 }
 
 extension AudioManager: MIDIListener {
-    func receivedMIDINoteOn(
+    nonisolated func receivedMIDINoteOn(
         noteNumber: MIDINoteNumber,
         velocity: MIDIVelocity,
         channel: MIDIChannel,
         portID: MIDIUniqueID?,
         timeStamp: MIDITimeStamp?
     ) {
+        Task { @MainActor in
+            self.handleMIDINoteOn(noteNumber: noteNumber, velocity: velocity, channel: channel)
+        }
+    }
+
+    private func handleMIDINoteOn(noteNumber: MIDINoteNumber, velocity: MIDIVelocity, channel: MIDIChannel) {
         logMIDI("on note \(noteNumber) ch \(channel + 1) vel \(velocity)")
         guard velocity > 0 else {
             noteOff(noteNumber, channel: channel)
             return
+        }
+
+        if let slot = activeLearnSlot {
+            switch slot {
+            case .pad(let index):
+                self.mappingConfig.padMappings = self.mappingConfig.padMappings.filter { $0.value != index && $0.key != Int(noteNumber) }
+                self.mappingConfig.padMappings[Int(noteNumber)] = index
+                self.saveMappingConfig()
+                self.activeLearnSlot = nil
+                self.publishStatus("Mapped Pad \(index + 1) to Note \(noteNumber)")
+                return
+            default:
+                break
+            }
         }
 
         learnPadsFrom(note: noteNumber, channel: channel)
@@ -820,13 +1240,19 @@ extension AudioManager: MIDIListener {
         }
     }
 
-    func receivedMIDINoteOff(
+    nonisolated func receivedMIDINoteOff(
         noteNumber: MIDINoteNumber,
         velocity: MIDIVelocity,
         channel: MIDIChannel,
         portID: MIDIUniqueID?,
         timeStamp: MIDITimeStamp?
     ) {
+        Task { @MainActor in
+            self.handleMIDINoteOff(noteNumber: noteNumber, velocity: velocity, channel: channel)
+        }
+    }
+
+    private func handleMIDINoteOff(noteNumber: MIDINoteNumber, velocity: MIDIVelocity, channel: MIDIChannel) {
         logMIDI("off note \(noteNumber) ch \(channel + 1)")
         if channel == padChannel, handlePadNoteOff(note: noteNumber) {
             return
@@ -835,18 +1261,39 @@ extension AudioManager: MIDIListener {
         }
     }
 
-    func receivedMIDIController(
+    nonisolated func receivedMIDIController(
         _ controller: MIDIByte,
         value: MIDIByte,
         channel: MIDIChannel,
         portID: MIDIUniqueID?,
         timeStamp: MIDITimeStamp?
     ) {
+        Task { @MainActor in
+            self.handleMIDIController(controller, value: value, channel: channel)
+        }
+    }
+
+    private func handleMIDIController(_ controller: MIDIByte, value: MIDIByte, channel: MIDIChannel) {
         logMIDI("cc \(controller) ch \(channel + 1) val \(value)")
+        
+        if let slot = activeLearnSlot {
+            switch slot {
+            case .cc(let target):
+                self.mappingConfig.ccMappings = self.mappingConfig.ccMappings.filter { $0.value != target && $0.key != Int(controller) }
+                self.mappingConfig.ccMappings[Int(controller)] = target
+                self.saveMappingConfig()
+                self.activeLearnSlot = nil
+                self.publishStatus("Mapped CC \(controller) to \(target.rawValue)")
+                return
+            default:
+                break
+            }
+        }
+
         handleControl(controller, value: value)
     }
 
-    func receivedMIDIAftertouch(
+    nonisolated func receivedMIDIAftertouch(
         noteNumber: MIDINoteNumber,
         pressure: MIDIByte,
         channel: MIDIChannel,
@@ -854,38 +1301,38 @@ extension AudioManager: MIDIListener {
         timeStamp: MIDITimeStamp?
     ) {}
 
-    func receivedMIDIAftertouch(
+    nonisolated func receivedMIDIAftertouch(
         _ pressure: MIDIByte,
         channel: MIDIChannel,
         portID: MIDIUniqueID?,
         timeStamp: MIDITimeStamp?
     ) {}
 
-    func receivedMIDIPitchWheel(
+    nonisolated func receivedMIDIPitchWheel(
         _ pitchWheelValue: MIDIWord,
         channel: MIDIChannel,
         portID: MIDIUniqueID?,
         timeStamp: MIDITimeStamp?
     ) {}
 
-    func receivedMIDIProgramChange(
+    nonisolated func receivedMIDIProgramChange(
         _ program: MIDIByte,
         channel: MIDIChannel,
         portID: MIDIUniqueID?,
         timeStamp: MIDITimeStamp?
     ) {}
 
-    func receivedMIDISystemCommand(
+    nonisolated func receivedMIDISystemCommand(
         _ data: [MIDIByte],
         portID: MIDIUniqueID?,
         timeStamp: MIDITimeStamp?
     ) {}
 
-    func receivedMIDISetupChange() {}
+    nonisolated func receivedMIDISetupChange() {}
 
-    func receivedMIDIPropertyChange(propertyChangeInfo: MIDIObjectPropertyChangeNotification) {}
+    nonisolated func receivedMIDIPropertyChange(propertyChangeInfo: MIDIObjectPropertyChangeNotification) {}
 
-    func receivedMIDINotification(notification: MIDINotification) {}
+    nonisolated func receivedMIDINotification(notification: MIDINotification) {}
 }
 
 private extension Comparable {

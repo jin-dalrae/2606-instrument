@@ -7,6 +7,8 @@ enum HarmonyStyle: Int, CaseIterable {
     case openFifths
     case fullTriad
     case dreamy
+    case seventh
+    case octaves
 
     var name: String {
         switch self {
@@ -20,6 +22,10 @@ enum HarmonyStyle: Int, CaseIterable {
             "Full Triad"
         case .dreamy:
             "Dreamy"
+        case .seventh:
+            "Seventh"
+        case .octaves:
+            "Open Octaves"
         }
     }
 }
@@ -268,6 +274,18 @@ struct HarmonyEngine {
                 interval(from: melodyDegree, degreeOffset: -2, scale: scale),
                 interval(from: melodyDegree, degreeOffset: -4 - max(0, spread - 1), scale: scale),
                 interval(from: melodyDegree, degreeOffset: -9, scale: scale)
+            ]
+        case .seventh:
+            return [
+                interval(from: melodyDegree, degreeOffset: -2, scale: scale),
+                interval(from: melodyDegree, degreeOffset: -4, scale: scale),
+                interval(from: melodyDegree, degreeOffset: -6, scale: scale),
+                interval(from: melodyDegree, degreeOffset: -8, scale: scale)
+            ]
+        case .octaves:
+            return [
+                -12,
+                12
             ]
         }
     }

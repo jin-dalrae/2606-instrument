@@ -1,6 +1,6 @@
 import Foundation
 
-struct InstrumentPreset: Identifiable, Hashable {
+struct InstrumentPreset: Identifiable, Hashable, Codable {
     let id: Int
     let name: String
     let program: UInt8
@@ -30,7 +30,7 @@ struct InstrumentPreset: Identifiable, Hashable {
     ]
 }
 
-struct TimeSignatureOption: Identifiable, Hashable {
+struct TimeSignatureOption: Identifiable, Hashable, Codable {
     let beats: Int
     let beatUnit: Int
 
@@ -57,3 +57,96 @@ struct TimeSignatureOption: Identifiable, Hashable {
 enum StarterSoundBank {
     static let systemDLSURL = URL(fileURLWithPath: "/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls")
 }
+
+struct PersistableLayerState: Codable {
+    let id: Int
+    let name: String
+    let presetID: Int?
+    let customInstrumentBookmarkData: Data?
+    let customInstrumentFilename: String?
+    let volume: Double
+    let isMuted: Bool
+    let isSoloed: Bool
+    let octaveOffset: Int
+    var delayFeedback: Double? = 0.3
+    var delayTime: Double? = 0.35
+    var delayDryWet: Double? = 0.0
+    var reverbDryWet: Double? = 0.0
+}
+
+enum VisualScene: String, Codable, CaseIterable, Identifiable {
+    case hyperdrive = "Hyperdrive"
+    case rain = "Rain"
+    case orbit = "Orbit"
+    case nebula = "Nebula"
+
+    var id: String { self.rawValue }
+}
+
+struct SessionState: Codable {
+    let tempoBPM: Double
+    let selectedTimeSignatureIndex: Int
+    let loopEnabled: Bool
+    let drumEnabled: Bool
+    let harmonyComplexity: Double
+    let keyRootIndex: Int
+    let keyModeRawValue: String
+    let padChannelNumber: Int
+    let currentLayer: Int
+    var activeScene: VisualScene? = .hyperdrive
+    let layers: [PersistableLayerState]
+}
+
+struct ImportedSoundFont: Codable, Identifiable, Hashable {
+    var id: UUID = UUID()
+    let name: String
+    let bookmarkData: Data
+}
+
+enum ControlTarget: String, Codable, CaseIterable, Identifiable {
+    case brightness = "Brightness"
+    case gravity = "Gravity"
+    case particleSize = "Particle Size / Spread"
+    case trail = "Trail / Voices"
+
+    var id: String { self.rawValue }
+}
+
+struct MIDIMappingConfiguration: Codable, Equatable {
+    var ccMappings: [Int: ControlTarget]
+    var padMappings: [Int: Int]
+
+    static let `default` = MIDIMappingConfiguration(
+        ccMappings: [
+            74: .brightness,
+            71: .gravity,
+            73: .particleSize,
+            72: .trail
+        ],
+        padMappings: (0..<16).reduce(into: [Int: Int]()) { dict, index in
+            dict[36 + index] = index
+        }
+    )
+}
+
+enum LearnSlot: Codable, Equatable, Hashable {
+    case cc(ControlTarget)
+    case pad(Int)
+}
+
+struct ScoreNote: Identifiable, Codable {
+    let id: UUID
+    let pitch: UInt8
+    let startTime: Date
+    var endTime: Date?
+    let layer: Int
+    
+    init(id: UUID = UUID(), pitch: UInt8, startTime: Date, endTime: Date? = nil, layer: Int) {
+        self.id = id
+        self.pitch = pitch
+        self.startTime = startTime
+        self.endTime = endTime
+        self.layer = layer
+    }
+}
+

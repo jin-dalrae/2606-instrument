@@ -1,30 +1,24 @@
 # MiniLab Particle DJ
 
-MiniLab Particle DJ is a native macOS performance app for turning an Arturia MiniLab Mk2 into a compact synth, DJ, and VJ station. It combines low-latency local MIDI input, layered AudioKit samplers, automatic harmony, pad-based instrument switching, and a reactive particle visualizer in one SwiftUI app.
+MiniLab Particle DJ is a native macOS performance app for turning an Arturia MiniLab Mk2 into a compact synth, DJ, and VJ station. It combines low-latency local MIDI input, layered AudioKit samplers, automatic harmony, pad-based instrument switching, an interactive on-screen keyboard, a real-time scrolling note score, and a reactive particle visualizer in one SwiftUI app.
 
 The app is designed for a Mac Mini or MacBook running fully on-device. No cloud services are required for MIDI, audio generation, harmony, or visuals.
 
 ## Current Features
 
-- Native macOS SwiftUI app targeting macOS 14 or newer.
-- AudioKit 5 audio graph with one `AudioEngine`, four `AppleSampler` layers, and a shared output `Mixer`.
-- Core MIDI input through AudioKit `MIDI`.
-- Arturia MiniLab Mk2-friendly mapping:
-  - Keys play the selected layer.
-  - Pads select the performance instrument used by the melody and harmony layers.
-  - Knobs control visualizer behavior.
-- Four performance layers for melody plus automatically generated harmony voices.
-- Built-in starter instrument presets loaded from the macOS system DLS sound bank.
-- Audio-layer support for `.sf2` and `.dls` instruments.
-- Rules-based harmony engine that detects key/chord context and adds diatonic GarageBand-style harmony voices.
-- FFT-driven SwiftUI `Canvas` particle visualizer with bass, mid, treble, note velocity, and knob modulation.
-- Visualizer-first performance screen with a compact HUD and rhythm controls.
-- Particle-only visualizer; graph-style meters are intentionally not drawn over the performance view.
-- Echo looper that repeats played notes and harmonies five times, fading gradually on each repeat.
-- Key, scale, time-signature, BPM, drum, and harmony-complexity controls.
-- Basic drum rhythm plus a selectable Drum Kit instrument.
-- Played-event log showing the note, instrument, harmony mode, and rhythm used for recent phrases.
-- Phrase-level looping: notes captured in a measure are replayed together as a bar-aligned phrase.
+- **Visualizer-First Glassmorphism**: Premium macOS `.ultraThinMaterial` styling with scrollable container safety to prevent UI truncation on smaller monitors (at least `1120 x 720`).
+- **On-Screen Interactive Keyboard**: An interactive piano keyboard on the screen. Play keys using the mouse or see them glow cyan when played via a connected MIDI controller. Clicking keys plays sounds and automatically writes notes to the scrolling played note score.
+- **Zero-Routing Audio**: Integrated AudioKit 5 audio graph with one `AudioEngine`, four `AppleSampler` layers, and a shared output `Mixer` running on-device without needing external DAWs or loopback drivers.
+- **Core MIDI Input**: Direct MIDI input handling with an active device monitor panel listing connected interfaces.
+- **Arturia MiniLab Mk2 Mappings**:
+  - Keys play the selected layer and trigger automatic backing harmonies.
+  - Pads select performance instruments or acts as layer/harmony-mode modifiers.
+  - Knobs modulate visualizer parameters (brightness, gravity, particle size, trails).
+- **Auto-Harmony Engine**: Rules-based engine that detects key/chord context and plays diatonic accompaniment voices arpeggiated across other layers.
+- **Real-Time Scrolling Note Score**: A scrolling grand staff displaying treble/bass clefs, Middle C ledger lines, color-coded layer note tracks, and active glows, synchronized with zero visual latency (playhead at `size.width - 60`).
+- **Performance Looper & Companion**: Captures played phrases and loops them up to five times with a gradual volume decay. Includes a step drum beat companion aligned to BPM and Time Signature.
+- **Instruments Preset Selection Panel**: Dropdown menus to select and load instruments for each layer directly on the screen.
+- **MIDI Learning Dashboard**: Remap any physical knob (CC) or pad (Note) directly from the visual settings tab. Mappings automatically persist in `UserDefaults`.
 
 ## Requirements
 
@@ -33,79 +27,67 @@ The app is designed for a Mac Mini or MacBook running fully on-device. No cloud 
 - Arturia MiniLab Mk2 or another Core MIDI controller.
 - Optional `.sf2` or `.dls` instrument libraries.
 
-The package can be parsed and built from the command line, but running as a Mac app is best done from Xcode.
-
 ## Setup
 
-Clone or open this repository, then open the Swift package in Xcode:
+1. Connect your MIDI controller via USB.
+2. Open the Swift package in Xcode:
+   ```sh
+   open Package.swift
+   ```
+3. Select the `MiniLabParticleDJ` scheme.
+4. Choose `My Mac` as the run destination.
+5. Run the app (`Cmd + R`).
 
-```sh
-open Package.swift
-```
+## Competitive Analysis
 
-In Xcode:
+How **MiniLab Particle DJ** compares to alternative VJ and MIDI performance solutions:
 
-1. Select the `MiniLabParticleDJ` scheme.
-2. Choose `My Mac` as the run destination.
-3. Connect the MiniLab Mk2 over USB.
-4. Run the app.
-
-The first build will fetch AudioKit from GitHub.
+| App / Project | Category | Strengths | Weaknesses / Gaps | MiniLab Particle DJ Advantage |
+| :--- | :--- | :--- | :--- | :--- |
+| **Vythm VJ / Euler VS / Imaginando VS** | Visual Synthesizers (App Store) | High-end 3D graphics, particle systems, shader presets. | **No audio generation**. Requires running a separate DAW + setting up virtual loopback drivers (e.g. Loopback, IAC) which increases latency and CPU overhead. | **All-in-One Integration**: Bundles zero-latency AudioKit samplers, MIDI learning, auto-harmony, drum sequencers, and reactive visuals into *one single app* with no routing required. |
+| **Apple MainStage / Gig Performer** | Audio Host Rig | Professional audio effects, routing, and VST/AU hosting. | **No built-in visuals**. Requires routing MIDI/audio out to a separate VJ app. Heavy resource footprint and steep learning curve. | **VJ-First Design**: Visually stunning particle system is built-in and mapped directly to music theory events (pitch, velocity, harmony) natively. |
+| **SeeMusic / MIDITrail** | 3D Piano Renderers | Beautiful 3D falling-note visualizers. | Designed as file players or visual recorders, not live performance rigs. **No audio engines**. | **Interactive Performance**: Designed specifically for live hardware triggers, loop capturing, and custom MIDI remapping. |
+| **MIDIVisualizer (kosua20)** | Open Source (GitHub) | Lightweight, OpenGL-based piano roll and particle generator. | **No audio synthesis**. Purely visual utility. | **Sound & Harmony**: Integrates an active synthesizer, auto-harmony engine, and physical drumbeat out-of-the-box. |
 
 ## MIDI Mapping
 
-The current mapping is intentionally simple and easy to change in `AudioManager.swift`.
+The default mapping is configured in `AudioManager.swift` and can be customized via the MIDI Settings UI.
 
 | Control | MIDI | Behavior |
 | --- | --- | --- |
-| Keyboard | Note on/off | Plays the current sampler layer and triggers harmony on other layers |
-| Pads on MIDI channel 10 | Notes `36...51` | Select one of 16 starter instrument presets for melody + harmony |
-| Pads on MIDI channel 10 | Hold notes `36` + `51` | Panic / all notes off |
-| Pads on MIDI channel 10 | Hold note `48` + pads `36...39` | Select layer 1-4 |
-| Pads on MIDI channel 10 | Hold note `49` + pads `36...40` | Select harmony mode: off, close 3rds, open 5ths, full triad, dreamy |
+| Keyboard | Note on/off | Plays current layer and triggers auto-harmony on other layers |
+| Pads | Notes `36...51` | Select instrument presets (Pads 1-16) |
+| Pads (Modifier) | Hold Pad 13 + Pads 1-4 | Select active synthesizer layer (1-4) |
+| Pads (Modifier) | Hold Pad 13 + Pad 15 | Toggle phrase loop playback (ON/OFF) |
+| Pads (Modifier) | Hold Pad 13 + Pad 16 | Toggle companion drumbeat (ON/OFF) |
+| Pads (Modifier) | Hold Pad 14 + Pads 1-7 | Select harmony mode (Off, Close 3rds, Open 5ths, Triad, Dreamy, Seventh, Octaves) |
+| Pads (Modifier) | Hold Pad 1 + Pad 16 | Panic / stop all active notes and schedulers |
 | Knob | CC `74` | Visual brightness |
 | Knob | CC `71` | Visual gravity |
 | Knob | CC `73` | Visual particle size + harmony spread |
 | Knob | CC `72` | Visual trail length + harmony voice count |
 | MIDI | CC `120` or `123` | Panic / all notes off |
 
-If your MiniLab pad notes differ, update `padBaseNote` in `Sources/MiniLabParticleDJ/AudioManager.swift`. If instruments do not change from the pads, set the MiniLab pads to MIDI channel 10 in Arturia MIDI Control Center or update `padChannel` in `AudioManager.swift`.
-
-Keyboard notes in the `36...51` range are treated as music, not instrument selection, unless they arrive on the configured pad channel.
-
 ## Looping
 
 The upper settings panel is grouped by purpose:
 
-- `Playback`: loop on/off and drums on/off.
-- `Rhythm`: tempo in BPM and time signature.
-- `Key`: root note plus major, minor, or pentatonic scale.
-- `Harmony`: complexity, which controls harmony density and rhythmic movement.
-- `MIDI`: MiniLab pad channel for instrument changes. Pad channel auto-learns when pad-range notes arrive from a non-keyboard channel.
+- `Playback`: Loop on/off and Drums on/off.
+- `Rhythm`: Tempo in BPM and time signature.
+- `Key`: Root note plus major or minor scale.
+- `Harmony`: Complexity, which controls arpeggiator density and micro-timing arpeggiations.
+- `MIDI`: Stepper for pad channel.
 
-The HUD shows the most recent MIDI messages so you can confirm note, CC, and channel values while pressing MiniLab controls.
-
-When you play within a measure, the app captures the melody plus its generated harmony voices as a phrase. At the next measure, it repeats that phrase five times on the selected time-signature grid. Each repeat is quieter than the previous one, so phrases fade away naturally instead of building forever.
-
-Looped phrases keep the instrument they were recorded with. If you play a piano phrase, switch to strings, and play another phrase, the older piano loop stays piano.
+When you play, the app captures the melody plus its generated harmony voices as a phrase. At the next measure, it repeats that phrase five times, fading away gradually.
 
 ## Instruments
 
 The starter presets use the macOS system DLS bank:
-
 ```text
 /System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls
 ```
 
-The current UI is intentionally performance-focused. SoundFont loading support exists in the audio layer, while the visible screen prioritizes MiniLab control, rhythm settings, and visual output.
-
-For bundled SoundFont packs, place files under:
-
-```text
-Sources/MiniLabParticleDJ/Resources/SoundFonts
-```
-
-The app does not bundle third-party SoundFonts yet. Keep license files with any packs you add.
+To load custom SoundFonts, click on a layer's preset selector dropdown, select **Import SoundFont / DLS...**, and choose a file. Bookmarks are automatically generated and persist in `UserDefaults` so files reload on relaunch.
 
 ## Project Structure
 
@@ -113,13 +95,15 @@ The app does not bundle third-party SoundFonts yet. Keep license files with any 
 Package.swift
 README.md
 docs/PRD.md
+docs/UserManual.md
 Sources/MiniLabParticleDJ/
   AudioManager.swift          Audio engine, samplers, MIDI, FFT, layer state
   ContentView.swift           Main SwiftUI performance UI
   HarmonyEngine.swift         Scale detection and harmony note generation
-  InstrumentLibrary.swift     Starter DLS preset list
+  InstrumentLibrary.swift     Starter DLS preset list and mapping models
   MiniLabParticleDJApp.swift  App entry point
   ParticleVisualizer.swift    Canvas particle renderer
+  ScrollingScoreView.swift    Real-time scrolling grand staff canvas
   Resources/SoundFonts/       Optional bundled instruments
 ```
 
@@ -131,10 +115,8 @@ Validate the package from the terminal:
 swift build
 ```
 
-This project currently sets Swift language mode to Swift 5 in `Package.swift`. That keeps AudioKit callback code practical while still building with modern Swift toolchains. A later hardening pass can move the mutable audio/UI state behind explicit actor boundaries.
-
-AudioKit buffer length is set to `.short` before the engine starts for lower live MIDI latency.
+This project is configured with strict Swift 6 concurrency checking (`swiftLanguageModes: [.v6]` in `Package.swift`). All mutable audio and UI state is isolated to `@MainActor` in `AudioManager.swift`, and incoming CoreMIDI background callbacks are safely routed across actor boundaries using modern Swift concurrency constructs.
 
 ## Roadmap
 
-See [docs/PRD.md](docs/PRD.md) for the product requirements, current scope, and planned milestones.
+See [docs/PRD.md](docs/PRD.md) for the product requirements, current scope, and completed milestones.
