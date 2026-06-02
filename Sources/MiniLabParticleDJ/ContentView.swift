@@ -59,71 +59,26 @@ struct ContentView: View {
     }
 
     private var settingsPanel: some View {
-        HStack(spacing: 16) {
-            Toggle(isOn: $audio.loopEnabled) {
-                Image(systemName: "repeat")
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                loopGroup
+                rhythmGroup
+                keyGroup
+                harmonyGroup
+                midiGroup
             }
-            .toggleStyle(.switch)
-            .labelsHidden()
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 8) {
-                    Text("Speed")
-                        .font(.caption.monospaced().weight(.bold))
-                        .foregroundStyle(.white.opacity(0.62))
-                    Text("\(Int(audio.tempoBPM.rounded())) BPM")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 12) {
+                    loopGroup
+                    rhythmGroup
+                    keyGroup
                 }
-
-                Slider(value: $audio.tempoBPM, in: 56...168, step: 1)
-                    .frame(width: 170)
-                    .tint(.cyan)
-            }
-
-            Picker("Time", selection: $audio.selectedTimeSignature) {
-                ForEach(TimeSignatureOption.options) { option in
-                    Text(option.label).tag(option)
+                HStack(alignment: .top, spacing: 12) {
+                    harmonyGroup
+                    midiGroup
                 }
             }
-            .pickerStyle(.segmented)
-            .frame(width: 230)
-
-            Picker("Key", selection: $audio.keyRootIndex) {
-                ForEach(Array(HarmonyEngine.KeySignature.pitchNames.enumerated()), id: \.offset) { index, name in
-                    Text(name).tag(index)
-                }
-            }
-            .frame(width: 78)
-
-            Picker("Scale", selection: $audio.keyMode) {
-                ForEach(HarmonyEngine.ScaleMode.allCases, id: \.self) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
-            }
-            .frame(width: 112)
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 8) {
-                    Text("Complex")
-                        .font(.caption.monospaced().weight(.bold))
-                        .foregroundStyle(.white.opacity(0.62))
-                    Text("\(Int((audio.harmonyComplexity * 100).rounded()))")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                }
-
-                Slider(value: $audio.harmonyComplexity, in: 0...1, step: 0.05)
-                    .frame(width: 150)
-                    .tint(.pink)
-            }
-
-            Toggle(isOn: $audio.drumEnabled) {
-                Label("Drums", systemImage: "metronome")
-            }
-            .toggleStyle(.button)
-
-            Stepper("Pad Ch \(audio.padChannelNumber)", value: $audio.padChannelNumber, in: 1...16)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .frame(width: 110)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -133,6 +88,96 @@ struct ContentView: View {
                 .stroke(.white.opacity(0.10), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
+    }
+
+    private var loopGroup: some View {
+        settingGroup("Playback") {
+            HStack(spacing: 8) {
+                Toggle("Loop", isOn: $audio.loopEnabled)
+                    .toggleStyle(.button)
+                Toggle("Drums", isOn: $audio.drumEnabled)
+                    .toggleStyle(.button)
+            }
+        }
+        .frame(width: 150)
+    }
+
+    private var rhythmGroup: some View {
+        settingGroup("Rhythm") {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("\(Int(audio.tempoBPM.rounded())) BPM")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    Slider(value: $audio.tempoBPM, in: 56...168, step: 1)
+                        .frame(width: 150)
+                        .tint(.cyan)
+                }
+
+                Picker("Time", selection: $audio.selectedTimeSignature) {
+                    ForEach(TimeSignatureOption.options) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 210)
+            }
+        }
+        .frame(width: 390)
+    }
+
+    private var keyGroup: some View {
+        settingGroup("Key") {
+            HStack(spacing: 8) {
+                Picker("Root", selection: $audio.keyRootIndex) {
+                    ForEach(Array(HarmonyEngine.KeySignature.pitchNames.enumerated()), id: \.offset) { index, name in
+                        Text(name).tag(index)
+                    }
+                }
+                .frame(width: 76)
+
+                Picker("Scale", selection: $audio.keyMode) {
+                    ForEach(HarmonyEngine.ScaleMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .frame(width: 118)
+            }
+        }
+        .frame(width: 220)
+    }
+
+    private var harmonyGroup: some View {
+        settingGroup("Harmony") {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Complexity \(Int((audio.harmonyComplexity * 100).rounded()))")
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                Slider(value: $audio.harmonyComplexity, in: 0...1, step: 0.05)
+                    .frame(width: 190)
+                    .tint(.pink)
+            }
+        }
+        .frame(width: 220)
+    }
+
+    private var midiGroup: some View {
+        settingGroup("MIDI") {
+            Stepper("Pad Channel \(audio.padChannelNumber)", value: $audio.padChannelNumber, in: 1...16)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .frame(width: 150)
+        }
+        .frame(width: 180)
+    }
+
+    private func settingGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.caption.monospaced().weight(.bold))
+                .foregroundStyle(.white.opacity(0.62))
+            content()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
     }
 
     private var activeLayer: LayerState {

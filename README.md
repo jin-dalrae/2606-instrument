@@ -75,16 +75,13 @@ Keyboard notes in the `36...51` range are treated as music, not instrument selec
 
 ## Looping
 
-The bottom rhythm control sets the loop timing:
+The upper settings panel is grouped by purpose:
 
-- `Speed`: tempo in BPM.
-- `Time`: time signature, currently `4/4`, `3/4`, `6/8`, or `3/8`.
-- `Key`: root note such as C, C#, D, etc.
-- `Scale`: major, minor, or pentatonic.
-- `Complex`: harmony density and rhythmic movement.
-- Repeat switch: enables or disables the echo looper.
-- `Drums`: enables or disables the built-in beat.
-- `Pad Ch`: MIDI channel used for MiniLab pad instrument changes.
+- `Playback`: loop on/off and drums on/off.
+- `Rhythm`: tempo in BPM and time signature.
+- `Key`: root note plus major, minor, or pentatonic scale.
+- `Harmony`: complexity, which controls harmony density and rhythmic movement.
+- `MIDI`: MiniLab pad channel for instrument changes.
 
 When you play within a measure, the app captures the melody plus its generated harmony voices as a phrase. At the next measure, it repeats that phrase five times on the selected time-signature grid. Each repeat is quieter than the previous one, so phrases fade away naturally instead of building forever.
 
