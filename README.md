@@ -1,40 +1,110 @@
 # MiniLab Particle DJ
 
-A native macOS SwiftUI starter app that turns an Arturia MiniLab Mk2 into a small live synth/DJ station with layered samplers, pad-based instrument selection, rules-based auto harmony, and an audio-reactive particle visualizer.
+MiniLab Particle DJ is a native macOS performance app for turning an Arturia MiniLab Mk2 into a compact synth, DJ, and VJ station. It combines low-latency local MIDI input, layered AudioKit samplers, automatic harmony, pad-based instrument switching, and a reactive particle visualizer in one SwiftUI app.
 
-## What is included
+The app is designed for a Mac Mini or MacBook running fully on-device. No cloud services are required for MIDI, audio generation, harmony, or visuals.
 
-- AudioKit `AudioEngine`, `Mixer`, `AppleSampler`, `MIDI`, and `FFTTap` wiring.
-- Four sampler layers routed into one mixer.
-- MiniLab Mk2-style pad mapping for notes `36...51`.
-- 25-key melody input with automatic third, fifth, and seventh harmony voices.
-- Pad-driven instrument preset switching using the macOS built-in DLS sound bank.
-- Runtime SF2/DLS import for free instrument libraries.
-- SwiftUI `Canvas` particle visualizer driven by FFT bass, mid, treble, note velocity, and knobs.
+## Current Features
 
-## Running
+- Native macOS SwiftUI app targeting macOS 14 or newer.
+- AudioKit 5 audio graph with one `AudioEngine`, four `AppleSampler` layers, and a shared output `Mixer`.
+- Core MIDI input through AudioKit `MIDI`.
+- Arturia MiniLab Mk2-friendly mapping:
+  - Keys play the selected layer.
+  - Pads select instruments for the selected layer.
+  - Knobs control visualizer behavior.
+- Four performance layers for stacked sounds and harmony voices.
+- Built-in starter instrument presets loaded from the macOS system DLS sound bank.
+- Runtime `.sf2` and `.dls` import for free SoundFont libraries.
+- Rules-based harmony engine that estimates a major/minor tonal center from active notes and adds third, fifth, seventh, and extension voices.
+- FFT-driven SwiftUI `Canvas` particle visualizer with bass, mid, treble, note velocity, and knob modulation.
+- On-screen layer selector, pad grid, visual controls, and audio meters.
 
-Open the package in Xcode:
+## Requirements
+
+- macOS 14 or newer.
+- Xcode with Swift Package Manager support.
+- Arturia MiniLab Mk2 or another Core MIDI controller.
+- Optional `.sf2` or `.dls` instrument libraries.
+
+The package can be parsed and built from the command line, but running as a Mac app is best done from Xcode.
+
+## Setup
+
+Clone or open this repository, then open the Swift package in Xcode:
 
 ```sh
 open Package.swift
 ```
 
-Then select the `MiniLabParticleDJ` scheme and run it on macOS 14 or newer.
+In Xcode:
 
-This workspace currently has Apple Command Line Tools selected instead of full Xcode, so command-line app building is not available here. Full validation should be done from Xcode.
+1. Select the `MiniLabParticleDJ` scheme.
+2. Choose `My Mac` as the run destination.
+3. Connect the MiniLab Mk2 over USB.
+4. Run the app.
 
-## MiniLab Mk2 mapping
+The first build will fetch AudioKit from GitHub.
 
-- Keys: play the current layer and generate harmony on the other layers.
-- Pads `36...51`: select one of 16 built-in GM/DLS presets for the current layer.
-- CC `74`: visual brightness.
-- CC `71`: visual gravity.
-- CC `73`: visual particle size.
-- CC `72`: visual trail.
+## MIDI Mapping
 
-If your pads use different note numbers, change `padBaseNote` in `AudioManager.swift`.
+The current mapping is intentionally simple and easy to change in `AudioManager.swift`.
 
-## SoundFonts
+| Control | MIDI | Behavior |
+| --- | --- | --- |
+| Keyboard | Note on/off | Plays the current sampler layer and triggers harmony on other layers |
+| Pads | Notes `36...51` | Select one of 16 starter instrument presets |
+| Knob | CC `74` | Visual brightness |
+| Knob | CC `71` | Visual gravity |
+| Knob | CC `73` | Visual particle size |
+| Knob | CC `72` | Visual trail length |
 
-The app can import `.sf2` or `.dls` files at runtime with the folder button in the UI. For bundled starter packs, place files under `Resources/SoundFonts` and load them from the app bundle in `InstrumentLibrary`.
+If your MiniLab pad notes differ, update `padBaseNote` in `Sources/MiniLabParticleDJ/AudioManager.swift`.
+
+## Instruments
+
+The starter presets use the macOS system DLS bank:
+
+```text
+/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls
+```
+
+You can also import `.sf2` or `.dls` files from the app using the folder button. Imported instruments load into the currently selected layer.
+
+For bundled SoundFont packs, place files under:
+
+```text
+Sources/MiniLabParticleDJ/Resources/SoundFonts
+```
+
+The app does not bundle third-party SoundFonts yet. Keep license files with any packs you add.
+
+## Project Structure
+
+```text
+Package.swift
+README.md
+docs/PRD.md
+Sources/MiniLabParticleDJ/
+  AudioManager.swift          Audio engine, samplers, MIDI, FFT, layer state
+  ContentView.swift           Main SwiftUI performance UI
+  HarmonyEngine.swift         Scale detection and harmony note generation
+  InstrumentLibrary.swift     Starter DLS preset list
+  MiniLabParticleDJApp.swift  App entry point
+  ParticleVisualizer.swift    Canvas particle renderer
+  Resources/SoundFonts/       Optional bundled instruments
+```
+
+## Development
+
+Validate the package from the terminal:
+
+```sh
+swift build
+```
+
+This project currently sets Swift language mode to Swift 5 in `Package.swift`. That keeps AudioKit callback code practical while still building with modern Swift toolchains. A later hardening pass can move the mutable audio/UI state behind explicit actor boundaries.
+
+## Roadmap
+
+See [docs/PRD.md](docs/PRD.md) for the product requirements, current scope, and planned milestones.
