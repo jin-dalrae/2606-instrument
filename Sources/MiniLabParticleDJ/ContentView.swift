@@ -37,8 +37,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            ParticleVisualizer(bands: audio.visualizerBands, controls: audio.controls, activeScene: audio.activeScene)
-                .ignoresSafeArea()
+            Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 hud
@@ -49,8 +48,6 @@ struct ContentView: View {
                         settingsPanel
                         
                         SmartChordsView()
-                        
-                        ScrollingScoreView()
                         
                         instrumentLayersPanel
                         
@@ -154,7 +151,6 @@ struct ContentView: View {
                 keyGroup
                 harmonyGroup
                 midiGroup
-                visualGroup
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -166,7 +162,6 @@ struct ContentView: View {
                 HStack(alignment: .top, spacing: 12) {
                     harmonyGroup
                     midiGroup
-                    visualGroup
                 }
             }
         }
@@ -302,43 +297,6 @@ struct ContentView: View {
         .frame(width: 190)
     }
 
-    private var visualGroup: some View {
-        settingGroup("Visuals") {
-            HStack(spacing: 8) {
-                Picker("Scene", selection: $audio.activeScene) {
-                    ForEach(VisualScene.allCases) { scene in
-                        Text(scene.rawValue).tag(scene)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .frame(width: 105)
-                .help("Select visualizer scene")
-                
-                Button(action: {
-                    toggleFullscreen()
-                }) {
-                    Image(systemName: isFullscreen ? "arrows.semibold.compress" : "arrows.semibold.expand")
-                        .font(.body.bold())
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.white.opacity(0.12))
-                .help("Toggle Fullscreen")
-            }
-            .frame(width: 145)
-        }
-        .frame(width: 165)
-    }
-
-    private func toggleFullscreen() {
-        if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
-            window.toggleFullScreen(nil)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                self.isFullscreen = window.styleMask.contains(.fullScreen)
-            }
-        }
-    }
-
     private func settingGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title)
@@ -427,8 +385,63 @@ struct ContentView: View {
                     )
                 }
             }
+
+            presetBoard
         }
         .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.white.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
+    }
+
+    private var presetBoard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("PRESETS")
+                    .font(.caption.monospaced().weight(.bold))
+                    .foregroundStyle(.white.opacity(0.62))
+                Spacer()
+                Text("Layer \(audio.currentLayer + 1)")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+            .padding(.horizontal, 10)
+
+            let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(InstrumentPreset.starterPresets) { preset in
+                    Button {
+                        audio.loadPreset(preset, into: audio.currentLayer)
+                    } label: {
+                        VStack(spacing: 4) {
+                            Text(String(preset.id + 1))
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                            Text(preset.name)
+                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.65)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 64)
+                        .background(audio.layers[audio.currentLayer].preset.id == preset.id ? Color.cyan.opacity(0.9) : Color.white.opacity(0.08))
+                        .foregroundStyle(audio.layers[audio.currentLayer].preset.id == preset.id ? .black : .white)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(audio.layers[audio.currentLayer].preset.id == preset.id ? Color.cyan : Color.white.opacity(0.12), lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+        }
         .padding(.vertical, 10)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -763,7 +776,7 @@ struct SmartChordsView: View {
         highlightGeneration += 1
         let generation = highlightGeneration
 
-        audio.triggerQuantizedOneShotNote(pad.rootNote, velocity: 100, channel: 1, quantizeToGrid: true)
+        audio.triggerChordPadNote(pad.rootNote, velocity: 100, channel: 1)
 
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 180_000_000)

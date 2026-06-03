@@ -58,6 +58,7 @@ private struct PerformanceVoice {
 }
 
 private struct StartedPerformanceNote {
+    let token: UUID
     let startedAt: Date
     let startOffset: TimeInterval
     let sourceVelocity: MIDIVelocity
@@ -108,6 +109,8 @@ final class AudioManager: ObservableObject {
     @Published var phraseStatus = "Phrase empty"
     @Published var midiEvents: [MIDIEventLog] = []
     @Published var scoreNotes: [ScoreNote] = []
+    @Published var visualsEnabled = false
+    @Published var scoreEnabled = false
 
     private let engine = AudioEngine()
     private let mixer = Mixer()
@@ -188,7 +191,9 @@ final class AudioManager: ObservableObject {
             hasStarted = true
             measureAnchor = Date()
             midi.openInput()
-            configureFFT()
+            if visualsEnabled {
+                configureFFT()
+            }
             loadLoopPresets()
             loadDrums()
             
@@ -236,9 +241,11 @@ final class AudioManager: ObservableObject {
         for layer in self.layers.indices {
             self.layers[layer].activeNotes.removeAll()
         }
-        for idx in scoreNotes.indices {
-            if scoreNotes[idx].endTime == nil {
-                scoreNotes[idx].endTime = Date()
+        if scoreEnabled {
+            for idx in scoreNotes.indices {
+                if scoreNotes[idx].endTime == nil {
+                    scoreNotes[idx].endTime = Date()
+                }
             }
         }
         self.phraseStatus = "Phrase empty"
@@ -287,6 +294,14 @@ final class AudioManager: ObservableObject {
             self.noteOff(note, channel: channel)
             self.activeOneShotNote = nil
         }
+    }
+
+    func triggerChordPadNote(
+        _ note: MIDINoteNumber,
+        velocity: MIDIVelocity = 100,
+        channel: MIDIChannel = 1
+    ) {
+        triggerQuantizedOneShotNote(note, velocity: velocity, channel: channel, quantizeToGrid: false)
     }
 
     func setLayerVolume(layer: Int, volume: Double) {
@@ -718,89 +733,52 @@ final class AudioManager: ObservableObject {
         guard samplers.indices.contains(currentLayer) else { return }
 
         applyHarmonyControls()
+        let sourceLayer = currentLayer
+        let sourcePreset = currentPreset
+        let sourceVelocity = velocity
+        let sourceChannel = channel
+        let noteToken = UUID()
+        let startedAt = Date()
         let activeNotes = Set(layers.flatMap(\.activeNotes)).union([note])
-        appendRecentMelodyNote(note)
-
-        let result = harmony.harmonize(
-            melodyNote: note,
+        let recentNotes = recentMelodyNotes + [note]
+        let harmonySettingsSnapshot = harmonySettings
+        let keySnapshot = harmony.snapshot(
             activeNotes: activeNotes,
-            recentNotes: recentMelodyNotes,
-            settings: harmonySettings
+            recentNotes: recentNotes,
+            fallbackNote: note,
+            lockedKey: harmonySettingsSnapshot.lockedKey
         )
-        let correctedMelody = harmony.correctedMelodyNote(note, settings: harmonySettings, snapshot: result.snapshot)
-        let melodyOctaveOffset = layers[currentLayer].octaveOffset * 12
+        let correctedMelody = harmony.correctedMelodyNote(note, settings: harmonySettingsSnapshot, snapshot: keySnapshot)
+        let melodyOctaveOffset = layers[sourceLayer].octaveOffset * 12
         let melodyNote = clampedMIDINote(Int(correctedMelody) + melodyOctaveOffset) ?? correctedMelody
-        if !shouldSilenceLayer(currentLayer) {
-            samplers[currentLayer].play(noteNumber: melodyNote, velocity: velocity, channel: channel)
-        }
-        
-        let mainScoreNote = ScoreNote(pitch: UInt8(melodyNote), startTime: Date(), endTime: nil, layer: currentLayer)
-        scoreNotes.append(mainScoreNote)
-        if scoreNotes.count > 120 {
-            scoreNotes.removeFirst(scoreNotes.count - 120)
+
+        if !shouldSilenceLayer(sourceLayer) {
+            samplers[sourceLayer].play(noteNumber: melodyNote, velocity: velocity, channel: channel)
         }
 
-        let harmonyVelocity = MIDIVelocity((Double(velocity) * harmonySettings.velocityScale).rounded().clamped(to: 1...127))
-        var voices: [PerformanceVoice] = [
-            PerformanceVoice(layer: currentLayer, instrumentID: currentPreset.id, note: melodyNote, channel: channel, velocityRatio: 1)
-        ]
-
-        for (offset, harmonyNote) in result.notes.enumerated() {
-            let layer = (currentLayer + offset + 1) % samplers.count
-            let harmonyOctaveOffset = layers[layer].octaveOffset * 12
-            let shiftedHarmonyNote = clampedMIDINote(Int(harmonyNote) + harmonyOctaveOffset) ?? harmonyNote
-            
-            // Calculate sequential melody step delay based on tempo and complexity
-            let beatDuration = 60.0 / tempoBPM
-            let stepDelay: Double
-            if harmonyComplexity < 0.35 {
-                stepDelay = 0.5 * beatDuration   // 8th note delay (melodic cascade)
-            } else if harmonyComplexity < 0.7 {
-                stepDelay = 0.25 * beatDuration  // 16th note delay (faster cascade)
-            } else {
-                stepDelay = 0.125 * beatDuration // 32nd note delay (very fast cascade)
+        if scoreEnabled {
+            let mainScoreNote = ScoreNote(pitch: UInt8(melodyNote), startTime: startedAt, endTime: nil, layer: sourceLayer)
+            scoreNotes.append(mainScoreNote)
+            if scoreNotes.count > 120 {
+                scoreNotes.removeFirst(scoreNotes.count - 120)
             }
-            let noteDelay = Double(offset + 1) * stepDelay
-            
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: UInt64(noteDelay * 1_000_000_000))
-                guard self.startedNotes[note] != nil else { return }
-                
-                let maxVelocityOffset = 2 + Int(self.harmonyComplexity * 10)
-                let velocityOffset = Int.random(in: -maxVelocityOffset...maxVelocityOffset)
-                let humanizedVelocity = MIDIVelocity((Double(harmonyVelocity) + Double(velocityOffset)).rounded().clamped(to: 1...127))
-                
-                if !self.shouldSilenceLayer(layer) {
-                    self.samplers[layer].play(noteNumber: shiftedHarmonyNote, velocity: humanizedVelocity, channel: channel)
-                }
-                
-                // Add the score note ONLY when the audio actually triggers
-                let harmonyScoreNote = ScoreNote(pitch: UInt8(shiftedHarmonyNote), startTime: Date(), endTime: nil, layer: layer)
-                self.scoreNotes.append(harmonyScoreNote)
-                if self.scoreNotes.count > 120 {
-                    self.scoreNotes.removeFirst(self.scoreNotes.count - 120)
-                }
-            }
-            
-            voices.append(PerformanceVoice(layer: layer, instrumentID: currentPreset.id, note: shiftedHarmonyNote, channel: channel, velocityRatio: harmonySettings.velocityScale))
         }
 
-        voicesBySourceNote[note] = voices
-        startedNotes[note] = StartedPerformanceNote(
-            startedAt: Date(),
-            startOffset: quantizedMeasureOffset(for: Date()),
-            sourceVelocity: velocity,
-            instrumentName: currentPreset.name,
-            harmonyName: harmonySettings.style.name,
+        let melodyVoice = PerformanceVoice(layer: sourceLayer, instrumentID: sourcePreset.id, note: melodyNote, channel: sourceChannel, velocityRatio: 1)
+        let startedNote = StartedPerformanceNote(
+            token: noteToken,
+            startedAt: startedAt,
+            startOffset: quantizedMeasureOffset(for: startedAt),
+            sourceVelocity: sourceVelocity,
+            instrumentName: sourcePreset.name,
+            harmonyName: harmonySettingsSnapshot.style.name,
             rhythmName: selectedTimeSignature.label,
-            voices: voices
+            voices: [melodyVoice]
         )
-        scheduleGridHarmony(from: voices, sourceVelocity: velocity)
-
-        self.layers[self.currentLayer].activeNotes.insert(note)
-        self.scaleLabel = result.snapshot.keyLabel
-        self.chordLabel = result.snapshot.chordLabel
-        self.harmonyLabel = "\(self.harmonySettings.style.name) C\(Int((self.harmonyComplexity * 100).rounded()))"
+        startedNotes[note] = startedNote
+        voicesBySourceNote[note] = [melodyVoice]
+        layers[sourceLayer].activeNotes.insert(note)
+        appendRecentMelodyNote(note)
         self.visualizerBands.lastVelocity = (Double(velocity) / 127).clamped(to: 0...1)
         self.visualizerBands.amplitude = max(self.visualizerBands.amplitude, self.visualizerBands.lastVelocity)
         self.visualizerBands.bass = max(self.visualizerBands.bass, self.visualizerBands.lastVelocity * 0.55)
@@ -808,6 +786,147 @@ final class AudioManager: ObservableObject {
         self.visualizerBands.treble = max(self.visualizerBands.treble, self.visualizerBands.lastVelocity * 0.45)
         self.visualizerBands.triggerID += 1
         self.lastMIDIEvent = "Note \(note) velocity \(velocity)"
+
+        scheduleHarmonyVoices(
+            note: note,
+            token: noteToken,
+            sourceLayer: sourceLayer,
+            sourceVelocity: sourceVelocity,
+            sourceChannel: sourceChannel,
+            sourcePreset: sourcePreset,
+            harmonySettings: harmonySettingsSnapshot,
+            keySnapshot: keySnapshot,
+            melodyNote: melodyNote,
+            startedAt: startedAt,
+            activeNotes: activeNotes,
+            recentNotes: recentNotes
+        )
+    }
+
+    private func scheduleHarmonyVoices(
+        note: MIDINoteNumber,
+        token: UUID,
+        sourceLayer: Int,
+        sourceVelocity: MIDIVelocity,
+        sourceChannel: MIDIChannel,
+        sourcePreset: InstrumentPreset,
+        harmonySettings: HarmonySettings,
+        keySnapshot: HarmonyEngine.Snapshot,
+        melodyNote: MIDINoteNumber,
+        startedAt: Date,
+        activeNotes: Set<MIDINoteNumber>,
+        recentNotes: [MIDINoteNumber]
+    ) {
+        guard harmonySettings.style != .off, harmonySettings.maxVoices > 0 else {
+            self.scaleLabel = keySnapshot.keyLabel
+            self.chordLabel = keySnapshot.chordLabel
+            self.harmonyLabel = "\(harmonySettings.style.name) C\(Int((self.harmonyComplexity * 100).rounded()))"
+            return
+        }
+
+        Task.detached(priority: .userInitiated) { [harmony, harmonySettings] in
+            let result = harmony.harmonize(
+                melodyNote: melodyNote,
+                activeNotes: activeNotes,
+                recentNotes: recentNotes,
+                settings: harmonySettings
+            )
+            let harmonyVelocity = MIDIVelocity((Double(sourceVelocity) * harmonySettings.velocityScale).rounded().clamped(to: 1...127))
+
+            await MainActor.run {
+                guard self.startedNotes[note]?.token == token else { return }
+
+                var voices = [PerformanceVoice(
+                    layer: sourceLayer,
+                    instrumentID: sourcePreset.id,
+                    note: melodyNote,
+                    channel: sourceChannel,
+                    velocityRatio: 1
+                )]
+
+                let orderedHarmonyNotes = self.orderedHarmonyNotes(result.notes, style: harmonySettings.style)
+                for (offset, harmonyNote) in orderedHarmonyNotes.enumerated() {
+                    let layer = (sourceLayer + offset + 1) % self.samplers.count
+                    let harmonyOctaveOffset = self.layers[layer].octaveOffset * 12
+                    let shiftedHarmonyNote = self.clampedMIDINote(Int(harmonyNote) + harmonyOctaveOffset) ?? harmonyNote
+
+                    let beatDuration = max(0.12, 60.0 / self.tempoBPM)
+                    let baseStep = self.harmonyComplexity < 0.35 ? beatDuration * 0.45 : (self.harmonyComplexity < 0.7 ? beatDuration * 0.25 : beatDuration * 0.125)
+                    let noteDelay = Double(offset) * baseStep
+
+                    Task.detached(priority: .userInitiated) { [note, token, layer, shiftedHarmonyNote, harmonyVelocity, sourceChannel] in
+                        if noteDelay > 0 {
+                            try? await Task.sleep(nanoseconds: UInt64(noteDelay * 1_000_000_000))
+                        }
+                        await MainActor.run {
+                            guard self.startedNotes[note]?.token == token else { return }
+
+                            let maxVelocityOffset = 2 + Int(self.harmonyComplexity * 10)
+                            let velocityOffset = Int.random(in: -maxVelocityOffset...maxVelocityOffset)
+                            let humanizedVelocity = MIDIVelocity((Double(harmonyVelocity) + Double(velocityOffset)).rounded().clamped(to: 1...127))
+
+                            if !self.shouldSilenceLayer(layer) {
+                                self.samplers[layer].play(noteNumber: shiftedHarmonyNote, velocity: humanizedVelocity, channel: sourceChannel)
+                            }
+
+                            if self.scoreEnabled {
+                                let harmonyScoreNote = ScoreNote(pitch: UInt8(shiftedHarmonyNote), startTime: Date(), endTime: nil, layer: layer)
+                                self.scoreNotes.append(harmonyScoreNote)
+                                if self.scoreNotes.count > 120 {
+                                    self.scoreNotes.removeFirst(self.scoreNotes.count - 120)
+                                }
+                            }
+                        }
+                    }
+
+                    voices.append(PerformanceVoice(
+                        layer: layer,
+                        instrumentID: sourcePreset.id,
+                        note: shiftedHarmonyNote,
+                        channel: sourceChannel,
+                        velocityRatio: harmonySettings.velocityScale
+                    ))
+                }
+
+                self.voicesBySourceNote[note] = voices
+                if self.startedNotes[note]?.token == token {
+                    self.startedNotes[note] = StartedPerformanceNote(
+                        token: token,
+                        startedAt: startedAt,
+                        startOffset: self.quantizedMeasureOffset(for: startedAt),
+                        sourceVelocity: sourceVelocity,
+                        instrumentName: sourcePreset.name,
+                        harmonyName: harmonySettings.style.name,
+                        rhythmName: self.selectedTimeSignature.label,
+                        voices: voices
+                    )
+                }
+                self.scheduleGridHarmony(from: voices, sourceVelocity: sourceVelocity)
+                self.scaleLabel = result.snapshot.keyLabel
+                self.chordLabel = result.snapshot.chordLabel
+                self.harmonyLabel = "\(harmonySettings.style.name) C\(Int((self.harmonyComplexity * 100).rounded()))"
+            }
+        }
+    }
+
+    private func orderedHarmonyNotes(_ notes: [MIDINoteNumber], style: HarmonyStyle) -> [MIDINoteNumber] {
+        let sorted = notes.sorted()
+        switch style {
+        case .off:
+            return []
+        case .closeThirds:
+            return sorted
+        case .openFifths:
+            return sorted
+        case .fullTriad:
+            return sorted
+        case .dreamy:
+            return sorted.reversed()
+        case .seventh:
+            return sorted
+        case .octaves:
+            return sorted
+        }
     }
 
     func noteOff(_ note: MIDINoteNumber, channel: MIDIChannel) {
@@ -815,14 +934,14 @@ final class AudioManager: ObservableObject {
 
         let melodyOctaveOffset = layers[currentLayer].octaveOffset * 12
         let melodyNote = clampedMIDINote(Int(note) + melodyOctaveOffset) ?? note
-        if let idx = scoreNotes.lastIndex(where: { ($0.pitch == note || $0.pitch == melodyNote) && $0.endTime == nil }) {
+        if scoreEnabled, let idx = scoreNotes.lastIndex(where: { ($0.pitch == note || $0.pitch == melodyNote) && $0.endTime == nil }) {
             scoreNotes[idx].endTime = Date()
         }
 
         if let voices = voicesBySourceNote.removeValue(forKey: note) {
             for voice in voices where samplers.indices.contains(voice.layer) {
                 samplers[voice.layer].stop(noteNumber: voice.note, channel: voice.channel)
-                if let idx = scoreNotes.lastIndex(where: { $0.pitch == voice.note && $0.endTime == nil }) {
+                if scoreEnabled, let idx = scoreNotes.lastIndex(where: { $0.pitch == voice.note && $0.endTime == nil }) {
                     scoreNotes[idx].endTime = Date()
                 }
             }
@@ -1188,7 +1307,7 @@ final class AudioManager: ObservableObject {
         guard tempoBPM > 0 else { return 0.75 }
         let beatDuration = 60 / tempoBPM
         let harmonyTail = gridStepDuration() * Double(max(2, harmonySettings.maxVoices + 1))
-        return max(beatDuration * 1.5, harmonyTail)
+        return max(beatDuration * 1.75, harmonyTail)
     }
 
     private func delayToNextGridBoundary(from date: Date) -> TimeInterval {
