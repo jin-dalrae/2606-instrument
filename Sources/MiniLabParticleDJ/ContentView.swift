@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import AudioKit
+import AppKit
 
 struct JSONDocument: FileDocument {
     static let readableContentTypes: [UTType] = [.json]
@@ -33,31 +34,25 @@ struct ContentView: View {
     @State private var isShowingMidiMap = false
     @State private var isFullscreen = false
 
-    static let layerColors: [Color] = [.green, .cyan, .pink, .purple]
-
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            ParticleVisualizer(bands: audio.visualizerBands, controls: audio.controls, activeScene: audio.activeScene)
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 hud
-                    .padding(22)
-                
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 12) {
-                        settingsPanel
-                        
-                        SmartChordsView()
-                        
-                        instrumentLayersPanel
-                        
-                        if isShowingMidiMap {
-                            midiMapPanel
-                        }
-                    }
                     .padding(.horizontal, 22)
-                    .padding(.bottom, 22)
+                    .padding(.top, 22)
+
+                Spacer(minLength: 0)
+
+                VStack(spacing: 12) {
+                    settingsPanel
+                    SmartChordsView()
+                    ScrollingScoreView()
                 }
+                .padding(.horizontal, 22)
+                .padding(.bottom, 22)
             }
         }
         .foregroundStyle(.white)
@@ -105,6 +100,13 @@ struct ContentView: View {
                 audio.status = "Failed to export session: \(error.localizedDescription)"
             }
         }
+        .sheet(isPresented: $isShowingMidiMap) {
+            midiMapPanel
+                .foregroundStyle(.white)
+                .padding(18)
+                .frame(minWidth: 720, idealWidth: 820, maxWidth: 900)
+                .background(Color.black)
+        }
     }
 
     private var hud: some View {
@@ -151,6 +153,8 @@ struct ContentView: View {
                 keyGroup
                 harmonyGroup
                 midiGroup
+                visualGroup
+                sessionGroup
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -162,6 +166,8 @@ struct ContentView: View {
                 HStack(alignment: .top, spacing: 12) {
                     harmonyGroup
                     midiGroup
+                    visualGroup
+                    sessionGroup
                 }
             }
         }
@@ -297,6 +303,51 @@ struct ContentView: View {
         .frame(width: 190)
     }
 
+    private var visualGroup: some View {
+        settingGroup("Visuals") {
+            HStack(spacing: 8) {
+                Picker("Scene", selection: $audio.activeScene) {
+                    ForEach(VisualScene.allCases) { scene in
+                        Text(scene.rawValue).tag(scene)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 105)
+                .help("Select visualizer scene")
+
+                Button(action: {
+                    toggleFullscreen()
+                }) {
+                    Image(systemName: isFullscreen ? "arrows.semibold.compress" : "arrows.semibold.expand")
+                        .font(.body.bold())
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.white.opacity(0.12))
+                .help("Toggle fullscreen")
+            }
+            .frame(width: 145)
+        }
+        .frame(width: 165)
+    }
+
+    private var sessionGroup: some View {
+        settingGroup("Files") {
+            sessionControls
+                .frame(width: 150)
+        }
+        .frame(width: 174)
+    }
+
+    private func toggleFullscreen() {
+        if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
+            window.toggleFullScreen(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.isFullscreen = window.styleMask.contains(.fullScreen)
+            }
+        }
+    }
+
     private func settingGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title)
@@ -340,125 +391,14 @@ struct ContentView: View {
         .padding(.top, 3)
     }
 
-    private var instrumentLayersPanel: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text("INSTRUMENTS")
-                    .font(.caption.monospaced().weight(.bold))
-                    .foregroundStyle(.white.opacity(0.62))
-                Spacer()
-                sessionControls
-            }
-            .padding(.horizontal, 10)
-            
-            VStack(spacing: 6) {
-                ForEach(0..<4) { index in
-                    HStack(spacing: 16) {
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(audio.currentLayer == index ? ContentView.layerColors[index % 4] : Color.white.opacity(0.2))
-                                .frame(width: 8, height: 8)
-                            
-                            Text("Layer \(index + 1)")
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
-                                .foregroundStyle(audio.currentLayer == index ? .white : .white.opacity(0.6))
-                        }
-                        .frame(width: 76, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            audio.selectLayer(index)
-                        }
-                        
-                        Spacer()
-                        
-                        instrumentMenu(for: index)
-                            .frame(width: 240, alignment: .leading)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(audio.currentLayer == index ? ContentView.layerColors[index % 4].opacity(0.08) : Color.clear)
-                    .contentShape(Rectangle())
-                    .cornerRadius(6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(audio.currentLayer == index ? ContentView.layerColors[index % 4].opacity(0.3) : Color.clear, lineWidth: 1)
-                    )
-                }
-            }
-
-            presetBoard
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(.white.opacity(0.10), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
-    }
-
-    private var presetBoard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("PRESETS")
-                    .font(.caption.monospaced().weight(.bold))
-                    .foregroundStyle(.white.opacity(0.62))
-                Spacer()
-                Text("Layer \(audio.currentLayer + 1)")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.45))
-            }
-            .padding(.horizontal, 10)
-
-            let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
-            LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(InstrumentPreset.starterPresets) { preset in
-                    Button {
-                        audio.loadPreset(preset, into: audio.currentLayer)
-                    } label: {
-                        VStack(spacing: 4) {
-                            Text(String(preset.id + 1))
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
-                            Text(preset.name)
-                                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.65)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 64)
-                        .background(audio.layers[audio.currentLayer].preset.id == preset.id ? Color.cyan.opacity(0.9) : Color.white.opacity(0.08))
-                        .foregroundStyle(audio.layers[audio.currentLayer].preset.id == preset.id ? .black : .white)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(audio.layers[audio.currentLayer].preset.id == preset.id ? Color.cyan : Color.white.opacity(0.12), lineWidth: 1)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 10)
-        }
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(.white.opacity(0.10), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
-    }
-
     private var sessionControls: some View {
         HStack(spacing: 8) {
             Button(action: {
                 isImportingSession = true
             }) {
-                Label("Load Session", systemImage: "square.and.arrow.down")
-                    .font(.caption.bold())
+                Image(systemName: "square.and.arrow.down")
+                    .font(.body.bold())
+                    .frame(width: 24, height: 24)
             }
             .buttonStyle(.borderedProminent)
             .tint(.white.opacity(0.12))
@@ -471,62 +411,25 @@ struct ContentView: View {
                     isExportingSession = true
                 }
             }) {
-                Label("Save Session", systemImage: "square.and.arrow.up")
-                    .font(.caption.bold())
+                Image(systemName: "square.and.arrow.up")
+                    .font(.body.bold())
+                    .frame(width: 24, height: 24)
             }
             .buttonStyle(.borderedProminent)
             .tint(.white.opacity(0.12))
             .help("Export current performance session to JSON")
-        }
-    }
 
-    private func instrumentMenu(for index: Int) -> some View {
-        Menu {
-            Section("Starter Presets") {
-                ForEach(InstrumentPreset.starterPresets) { preset in
-                    Button(action: { audio.loadPreset(preset, into: index) }) {
-                        Text(preset.name)
-                    }
-                }
-            }
-            
-            if !audio.importedSoundFonts.isEmpty {
-                Section("Imported Library") {
-                    ForEach(audio.importedSoundFonts) { sf in
-                        Button(action: {
-                            audio.loadCustomInstrument(bookmarkData: sf.bookmarkData, into: index, filename: sf.name)
-                        }) {
-                            HStack {
-                                Text(sf.name)
-                                Image(systemName: "doc.music")
-                            }
-                        }
-                    }
-                }
-            }
-            
-            Divider()
-            
             Button(action: {
-                selectedImportLayer = index
+                selectedImportLayer = audio.currentLayer
                 isImportingSoundFont = true
             }) {
-                Label("Import SoundFont / DLS...", systemImage: "doc.badge.plus")
+                Image(systemName: "doc.badge.plus")
+                    .font(.body.bold())
+                    .frame(width: 24, height: 24)
             }
-        } label: {
-            HStack {
-                Text(audio.layers[index].name)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer()
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
-            .foregroundStyle(.white)
+            .buttonStyle(.borderedProminent)
+            .tint(.white.opacity(0.12))
+            .help("Import SoundFont or DLS into the active layer")
         }
     }
 

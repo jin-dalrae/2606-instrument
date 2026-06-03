@@ -76,19 +76,19 @@ The implementation is a native macOS SwiftUI app powered by AudioKit 5. Performe
 
 - Main performance screen with full-window particle visualizer.
 - Premium glassmorphism layout using macOS `.ultraThinMaterial` backgrounds.
-- Scroll safety view wrapping all panels below the HUD to prevent truncation on smaller screens.
+- Fixed, no-scroll performance surface at the supported desktop minimum.
 - Compact HUD for audio/MIDI state, last MIDI event, current instrument, and detected harmony/scale label.
 - Key, scale, time-signature, custom playback toggles, and harmony-complexity controls.
 - **Smart On-Screen Chord Pads**: Eight diatonic chord pads adapt to the active key and scale. A click triggers a quantized one-shot note with auto-release, while the played pitch writes directly to the grand staff score.
 - **Real-Time Scrolling Note Score**: A scrolling grand staff displaying treble/bass clefs, Middle C ledger lines, color-coded layer note tracks, and active glows, synchronized with zero visual latency (playhead at `size.width - 60`).
-- **Instrument Selection Panel**: Dropdown menus to select and change the instrument preset of each of the 4 layers on-screen directly.
+- Instrument preset and layer selection remain controller-led through MiniLab pad shortcuts; the HUD shows the active instrument.
 - Particle-only visualizer without graph-style meters over the performance view.
 
 ## User Stories
 
 - As a performer, I can connect my MiniLab Mk2 and immediately play a sound from the keys.
 - As a performer, I can press a pad to switch the current layer's instrument.
-- As a performer, I can select a different layer on screen and load a different instrument into it.
+- As a performer, I can select a different layer from the controller and load a different instrument into the active layer.
 - As a performer, I can play a melody and hear automatic harmony on companion layers.
 - As a performer, I can turn knobs and see the visualizer respond during playback.
 - As a producer, I can import a free SoundFont and use it without modifying the code.
@@ -130,7 +130,7 @@ The implementation is a native macOS SwiftUI app powered by AudioKit 5. Performe
 
 ### UI
 - The app must show active preset, app status, and last MIDI event without covering the visualizer.
-- The app must keep the primary screen visualizer-first with scroll safety.
+- The app must keep the primary screen visualizer-first without vertical page scrolling.
 - The app should be usable at a desktop window size of at least `1120 x 720`.
 
 ## Non-Functional Requirements
@@ -146,7 +146,7 @@ The implementation is a native macOS SwiftUI app powered by AudioKit 5. Performe
 - The app builds successfully with `swift build`.
 - A connected MiniLab Mk2 can trigger sound from the hardware keys and pads.
 - The on-screen chord pads can trigger quantized one-shot harmony figures without requiring click-and-hold input.
-- All 16 pads can select visible starter presets.
+- All 16 pads can select starter presets.
 - Holding pad 1 and pad 16 together stops active notes.
 - Holding pad 13 and pressing pads 1-4 changes the current layer.
 - Holding pad 14 and pressing pads 1-7 changes harmony mode.
@@ -184,4 +184,4 @@ The implementation is a native macOS SwiftUI app powered by AudioKit 5. Performe
 - Added visual scenes: Hyperdrive, Rain, Orbit, and Nebula.
 - Added native AppKit fullscreen mode.
 - Built-in Scrolling Played Note Score grand staff replacing the played event log.
-- Enforced ScrollView safety, on-screen chord-pad trigger, and glassmorphic `.ultraThinMaterial` styling.
+- Enforced a fixed no-scroll performance surface, on-screen chord-pad trigger, and glassmorphic `.ultraThinMaterial` styling.

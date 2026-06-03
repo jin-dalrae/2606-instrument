@@ -24,9 +24,7 @@ Welcome to **MiniLab Particle DJ**, a native macOS performance app that transfor
 
 ## 2. Interactive Performance Controls
 
-The main workspace is designed around a premium visualizer-first layout. The controls are housed in responsive, floating glassmorphic panels using macOS `.ultraThinMaterial` backgrounds. This allows the VJ visuals to bleed and blur beautifully behind the interface.
-
-To accommodate different monitor sizes and configurations (with a minimum height requirement of `720` points), all panels below the HUD are wrapped in a vertical scrolling list. The HUD remains pinned at the top for immediate feedback, while other controls can be scrolled if needed (such as when the MIDI Mapping panel is open).
+The main workspace is designed around a premium visualizer-first layout. The controls are housed in responsive, floating glassmorphic panels using macOS `.ultraThinMaterial` backgrounds. The instrument screen is fixed at the supported `1120 x 720` minimum and does not vertically scroll during performance.
 
 ### Smart On-Screen Chord Pads
 Eight diatonic chord pads are available in the center of the panels:
@@ -42,10 +40,11 @@ The **Played Note Score** is a real-time grand staff piano roll displayed in the
 *   **Layer Color-Coding**: Notes and tails are color-coded based on the layer that triggered them (Layer 1: Green/Mint, Layer 2: Cyan, Layer 3: Pink, Layer 4: Purple), making it easy to see which part of the melody or generated harmony plays each note.
 *   **Ledger Lines**: The view automatically draws a ledger line for Middle C (C4 / MIDI Pitch 60) when triggered.
 
-### Instrument Selection Panel
-Each of the 4 sampler layers can have its instrument preset changed on the screen:
-*   **Active Indicator**: The currently active layer is highlighted with its specific theme color indicator dot and row border. Click on a layer row to select it as the active layer.
-*   **Preset Selection Dropdown**: Click on the preset selector dropdown next to the layer to choose a Melodic/Drum kit starter sound bank, or import custom `.sf2`/`.dls` libraries.
+### Instrument Selection
+Instrument preset and layer changes are handled from the controller:
+*   **Preset Selection**: Press pads 1-16 to load starter presets into the active layer.
+*   **Layer Selection**: Hold Pad 13 and press pads 1-4 to choose the active sampler layer.
+*   **Custom SoundFonts**: Use the file import button in the top control strip to load a `.sf2` or `.dls` file into the active layer.
 
 ---
 
@@ -113,7 +112,7 @@ Click the **Expand** button (`arrows.expand`) next to the Visuals picker to ente
 ## 6. MIDI Learning & Map Config
 
 If your MIDI controller has a different layout than the factory default, you can remap controls instantly:
-1.  Click **Map...** next to the MIDI channel stepper.
+1.  Click **Map...** next to the MIDI channel stepper to open the mapping sheet.
 2.  At the top of the mapping panel, you can see all active **Inputs** (connected MIDI device names) detected by the OS.
 3.  To map a Knob: Click **Learn** or **Unmapped** next to a parameter (e.g., Gravity). The button will say **Waiting...**. Twist a knob on your controller to bind it.
 4.  To map a Pad: Click a pad cell (e.g. Pad 1) in the 4x4 grid. Press a physical pad on your controller to map it.

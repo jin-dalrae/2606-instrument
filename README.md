@@ -6,7 +6,7 @@ The app is designed for a Mac Mini or MacBook running fully on-device. No cloud 
 
 ## Current Features
 
-- **Visualizer-First Glassmorphism**: Premium macOS `.ultraThinMaterial` styling with scrollable container safety to prevent UI truncation on smaller monitors (at least `1120 x 720`).
+- **Fixed Performance Surface**: Full-window particle visualizer with compact `.ultraThinMaterial` overlays; the main instrument screen does not vertically scroll at the supported `1120 x 720` minimum.
 - **Smart On-Screen Chord Pads**: Eight diatonic chord pads adapt to the active key and scale. Clicking a pad triggers a quantized one-shot note with auto-release, so you can fire harmonic ideas without holding the mouse down.
 - **Zero-Routing Audio**: Integrated AudioKit 5 audio graph with one `AudioEngine`, four `AppleSampler` layers, and a shared output `Mixer` running on-device without needing external DAWs or loopback drivers.
 - **Core MIDI Input**: Direct MIDI input handling with an active device monitor panel listing connected interfaces.
@@ -17,8 +17,7 @@ The app is designed for a Mac Mini or MacBook running fully on-device. No cloud 
 - **Auto-Harmony Engine**: Rules-based engine that detects key/chord context and plays diatonic accompaniment voices arpeggiated across other layers.
 - **Real-Time Scrolling Note Score**: A scrolling grand staff displaying treble/bass clefs, Middle C ledger lines, color-coded layer note tracks, and active glows, synchronized with zero visual latency (playhead at `size.width - 60`).
 - **Performance Looper & Companion**: Captures played phrases and loops them up to five times with a gradual volume decay. Includes a step drum beat companion aligned to BPM and Time Signature. Looped phrases preserve the instrument that was captured with them.
-- **Instruments Preset Selection Panel**: Dropdown menus to select and load instruments for each layer directly on the screen.
-- **MIDI Learning Dashboard**: Remap any physical knob (CC) or pad (Note) directly from the visual settings tab. Mappings automatically persist in `UserDefaults`.
+- **MIDI Learning Dashboard**: Remap any physical knob (CC) or pad (Note) from the MIDI mapping sheet. Mappings automatically persist in `UserDefaults`.
 
 ## Requirements
 
@@ -88,7 +87,7 @@ The starter presets use the macOS system DLS bank:
 /System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls
 ```
 
-To load custom SoundFonts, click on a layer's preset selector dropdown, select **Import SoundFont / DLS...**, and choose a file. Bookmarks are automatically generated and persist in `UserDefaults` so files reload on relaunch.
+Use the MiniLab pads to select starter presets for the active layer. To load a custom SoundFont into the active layer, use the file import button in the top control strip and choose a `.sf2` or `.dls` file. Bookmarks are automatically generated and persist in `UserDefaults` so files reload on relaunch.
 
 ## Project Structure
 
