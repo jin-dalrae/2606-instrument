@@ -190,7 +190,7 @@ final class AudioManager: ObservableObject {
             try engine.start()
             hasStarted = true
             measureAnchor = Date()
-            midi.openInput()
+            openMIDIInputs()
             if visualsEnabled {
                 configureFFT()
             }
@@ -204,9 +204,27 @@ final class AudioManager: ObservableObject {
             }
             
             startDrumLoop()
-            publishStatus("Engine running. Listening to Core MIDI inputs.")
+            publishMIDIInputStatus()
         } catch {
             publishStatus("Engine failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// (Re)connect to every Core MIDI source. AudioKit only enumerates inputs at
+    /// the moment `openInput()` is called, so a controller that appears late or is
+    /// hot-plugged is invisible until we open again. Close first so re-opening an
+    /// already-connected device doesn't leak its port.
+    func openMIDIInputs() {
+        midi.closeAllInputs()
+        midi.openInput()
+        logMIDI("inputs: \(connectedDevices.isEmpty ? "none" : connectedDevices.joined(separator: ", "))")
+    }
+
+    private func publishMIDIInputStatus() {
+        if connectedDevices.isEmpty {
+            publishStatus("Engine running. No MIDI inputs detected — connect your MiniLab.")
+        } else {
+            publishStatus("Engine running. Listening to: \(connectedDevices.joined(separator: ", ")).")
         }
     }
 
@@ -850,8 +868,7 @@ final class AudioManager: ObservableObject {
                     let harmonyOctaveOffset = self.layers[layer].octaveOffset * 12
                     let shiftedHarmonyNote = self.clampedMIDINote(Int(harmonyNote) + harmonyOctaveOffset) ?? harmonyNote
 
-                    let beatDuration = max(0.12, 60.0 / self.tempoBPM)
-                    let baseStep = self.harmonyComplexity < 0.35 ? beatDuration * 0.45 : (self.harmonyComplexity < 0.7 ? beatDuration * 0.25 : beatDuration * 0.125)
+                    let baseStep = self.arpStepDuration()
                     let noteDelay = Double(offset) * baseStep
 
                     Task.detached(priority: .userInitiated) { [note, token, layer, shiftedHarmonyNote, harmonyVelocity, sourceChannel] in
@@ -1097,7 +1114,7 @@ final class AudioManager: ObservableObject {
         guard !harmonyVoices.isEmpty, harmonyComplexity > 0.18 else { return }
 
         let generation = loopGeneration
-        let step = gridStepDuration()
+        let step = arpStepDuration()
         let steps = Int((1 + harmonyComplexity * 5).rounded()).clamped(to: 1...6)
 
         for index in 0..<steps {
@@ -1126,6 +1143,14 @@ final class AudioManager: ObservableObject {
         let quarter = 60 / tempoBPM
         let beat = quarter * (4 / Double(selectedTimeSignature.beatUnit))
         return beat / (harmonyComplexity > 0.70 ? 2 : 1)
+    }
+
+    /// Rhythmic spacing for the arpeggiator. Plays as a quarter-note (1/4) arp
+    /// when gentle and an eighth-note (1/8) arp when busy — never faster, so the
+    /// harmony notes step out as a melody instead of stacking on the beat.
+    private func arpStepDuration() -> TimeInterval {
+        let beat = max(0.12, (60 / tempoBPM) * (4 / Double(selectedTimeSignature.beatUnit)))
+        return harmonyComplexity > 0.5 ? beat * 0.5 : beat
     }
 
     private func capturePhraseNote(_ startedNote: StartedPerformanceNote, duration: TimeInterval) {
@@ -1305,9 +1330,12 @@ final class AudioManager: ObservableObject {
 
     private func oneShotHoldDuration() -> TimeInterval {
         guard tempoBPM > 0 else { return 0.75 }
-        let beatDuration = 60 / tempoBPM
-        let harmonyTail = gridStepDuration() * Double(max(2, harmonySettings.maxVoices + 1))
-        return max(beatDuration * 1.75, harmonyTail)
+        let beat = max(0.12, (60 / tempoBPM) * (4 / Double(selectedTimeSignature.beatUnit)))
+        // Gate a single click to a whole number of beats — long enough for the
+        // arpeggio to step out, then released cleanly on the beat.
+        let arpSpan = arpStepDuration() * Double(max(1, harmonySettings.maxVoices))
+        let beatsNeeded = max(1.0, (arpSpan / beat).rounded(.up))
+        return beat * beatsNeeded
     }
 
     private func delayToNextGridBoundary(from date: Date) -> TimeInterval {
@@ -1508,7 +1536,13 @@ extension AudioManager: MIDIListener {
         timeStamp: MIDITimeStamp?
     ) {}
 
-    nonisolated func receivedMIDISetupChange() {}
+    nonisolated func receivedMIDISetupChange() {
+        Task { @MainActor in
+            guard self.hasStarted else { return }
+            self.openMIDIInputs()
+            self.publishMIDIInputStatus()
+        }
+    }
 
     nonisolated func receivedMIDIPropertyChange(propertyChangeInfo: MIDIObjectPropertyChangeNotification) {}
 
